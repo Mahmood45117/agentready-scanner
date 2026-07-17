@@ -85,6 +85,37 @@ INDEX_ED1 = [
     ("rhone.com", 35, "D", "robots.txt unreachable · Cloudflare risk · no product data"),
 ]
 
+# category -> [domains] (for the competitive comparison table on report pages)
+CATEGORIES = {
+    "Cookware":                   ["hexclad.com", "fromourplace.com", "carawayhome.com"],
+    "Mattresses":                 ["casper.com", "helixsleep.com"],
+    "Men's & performance apparel":["trueclassictees.com", "chubbiesshorts.com", "vuoriclothing.com", "gymshark.com", "aloyoga.com", "rhone.com"],
+    "Greens & supplements":       ["livemomentous.com", "huel.com", "nutrafol.com", "seed.com", "drinkag1.com"],
+    "Bedding & home textiles":    ["brooklinen.com", "ruggable.com"],
+    "Beauty":                     ["glossier.com", "jonesroadbeauty.com"],
+    "Food & beverage":            ["magicspoon.com", "athleticbrewing.com", "graza.co", "mudwtr.com", "drinklmnt.com"],
+}
+_INDEX = {d: (s, g, note) for d, s, g, note in INDEX_ED1}
+_RANK = {d: i for i, (d, *_) in enumerate(INDEX_ED1, 1)}
+
+def category_of(domain):
+    for cat, doms in CATEGORIES.items():
+        if domain in doms:
+            return cat, doms
+    return None, []
+
+def brand_report(domain):
+    """Public teaser data for an Index brand. Whitelisted to INDEX only (no arbitrary scans)."""
+    if domain not in _INDEX:
+        return None
+    score, grade, note = _INDEX[domain]
+    cat, doms = category_of(domain)
+    peers = sorted([(d, _INDEX[d][0], _INDEX[d][1]) for d in doms if d in _INDEX],
+                   key=lambda x: -x[1]) if cat else []
+    return {"domain": domain, "score": score, "grade": grade, "note": note,
+            "rank": _RANK.get(domain), "total": len(INDEX_ED1),
+            "category": cat, "peers": peers}
+
 def fetch(url):
     try:
         return requests.get(url, headers={"User-Agent": UA}, timeout=TIMEOUT, allow_redirects=True)
@@ -237,8 +268,13 @@ radial-gradient(1200px 500px at 50% -10%,#131b36 0%,var(--bg) 60%);color:var(--t
 .stat b{display:block;font-size:1.5em;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
 .stat span{color:var(--dim);font-size:.85em}
 form.scan{display:flex;gap:10px;max-width:600px;margin:0 auto}
-input[name=domain]{flex:1;padding:17px 20px;font-size:1.05em;border-radius:14px;border:1px solid var(--line);background:var(--card);color:#fff;outline:none;transition:border .2s}
-input[name=domain]:focus{border-color:#6d8dff}
+input[name=domain],input[type=email]{flex:1;padding:17px 20px;font-size:1.05em;border-radius:14px;border:1px solid var(--line);background:var(--card);color:#fff;outline:none;transition:border .2s}
+input[name=domain]:focus,input[type=email]:focus{border-color:#6d8dff}
+.repcard{background:var(--grad2);border:1px solid #2c3760;border-radius:18px;padding:34px 30px;text-align:center;margin:20px 0}
+.repcard .score{font-size:4.4em}
+.rank{color:var(--mut);font-size:1.05em;margin-top:6px}
+.yourrow{background:#1a2140!important}
+.yourrow td{color:#fff!important;font-weight:700}
 button,.btn{padding:17px 32px;font-size:1.05em;font-weight:700;border-radius:14px;border:0;background:var(--grad);color:#06131a;cursor:pointer;text-decoration:none;display:inline-block}
 button:hover,.btn:hover{filter:brightness(1.1)}
 .steps{display:flex;gap:14px;margin:40px 0 0;flex-wrap:wrap}
@@ -325,7 +361,7 @@ INDEX_PAGE = """<!doctype html><html><head><title>The Agent-Ready Index — Edit
 <p><b>Edition #1 — July 2026.</b> Thirty leading DTC brands, scanned for AI-shopping readiness.<br>
 Headline finding: <b style="color:#ffbd2e">two-thirds score below A</b> — broken product data, blocked crawlers, invisible listings.</p></div>
 <div class="card"><table><tr><th>#</th><th>BRAND</th><th>SCORE</th><th>GRADE</th><th>KEY FINDING</th></tr>
-{% for i,(d,s,g,note) in rows %}<tr><td>{{i}}</td><td><b>{{d}}</b></td><td>{{s}}/100</td><td class="g{{g}}">{{g}}</td><td style="color:#8b93a7">{{note}}</td></tr>{% endfor %}
+{% for i,(d,s,g,note) in rows %}<tr><td>{{i}}</td><td><b><a href="/report/{{d}}" style="color:#eef1f8;text-decoration:none;border-bottom:1px dotted #2c3760">{{d}}</a></b></td><td>{{s}}/100</td><td class="g{{g}}">{{g}}</td><td style="color:#8b93a7">{{note}}</td></tr>{% endfor %}
 </table></div>
 <div class="card cta"><h3>Is your store on the wrong half of this table?</h3>
 <p>Run the free scan — or request the full audit with live AI-surface testing inside ChatGPT, Perplexity &amp; Copilot.</p>
@@ -352,6 +388,20 @@ def index():
 def index_report():
     return render_template_string(INDEX_PAGE, rows=list(enumerate(INDEX_ED1, 1)), scans=scan_count())
 
+@app.route("/report/<path:domain>")
+def brand_report_page(domain):
+    domain = re.sub(r"^https?://", "", domain.strip().lower()).split("/")[0].replace("www.", "")
+    r = brand_report(domain)
+    if not r:
+        # not an Index brand — send them to the free scanner instead of scanning arbitrary input
+        return render_template_string(BASE_DOC, body=(
+            "<div class='wrap'><div class='card cta' style='margin-top:60px'>"
+            "<h3>" + domain + " isn't on the Index yet</h3>"
+            "<p>Run it through the free scanner to get its agent-readiness score.</p>"
+            "<a class='btn' href='/'>Scan " + domain + " free →</a></div></div>")), 404
+    class O(dict): __getattr__ = dict.get
+    return render_template_string(REPORT_PAGE, r=O(r))
+
 
 @app.route("/request", methods=["POST"])
 def request_audit():
@@ -366,6 +416,45 @@ def request_audit():
         "</b> is queued. We\'ll email the 7-point report within 5 business days"
         + ((" to <b>"+email+"</b>") if email else "") + ".</p>"
         "<a class='btn' href='/'>← Back</a></div></div>"))
+
+REPORT_PAGE = """<!doctype html><html><head><title>{{r.domain}} — Agent-Readiness Report | CanAIShopYou</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="{{r.domain}} scores {{r.score}}/100 (grade {{r.grade}}) on agent-readiness — how well AI shopping assistants can find, read &amp; buy from the store.">
+<meta property="og:title" content="{{r.domain}}: {{r.score}}/100 on the Agent-Ready Index">
+<meta property="og:description" content="How ready is {{r.domain}} for AI shopping assistants (ChatGPT, Perplexity, Copilot)? {{r.note}}">
+<meta property="og:type" content="website"><meta name="twitter:card" content="summary">
+<style>""" + BASE_CSS + """</style></head><body>""" + NAV + """
+<div class="hero" style="padding-bottom:8px">
+<h1>Is <em>{{r.domain}}</em><br>ready for AI shoppers?</h1></div>
+<div class="wrap">
+<div class="repcard">
+<span class="score g{{r.grade}}">{{r.score}}/100</span>
+<span class="grade">&nbsp;grade {{r.grade}}</span>
+<div class="rank">Ranked #{{r.rank}} of {{r.total}} leading DTC brands on the Agent-Ready Index</div>
+</div>
+<div class="card"><b>What the scan found:</b><br><span style="color:#8b93a7">{{r.note}}</span></div>
+<div class="card"><b>Why this matters:</b><br><span style="color:#8b93a7">
+AI assistants are the fastest-growing shopping surface — AI-referred retail traffic is up 1,324% since Oct '24 and converts ~42% better. When your store scores low here, those assistants can't reliably read your prices, stock, or catalog — so they guess, misquote, or recommend a competitor instead. This is the channel most brands aren't measuring yet.</span></div>
+
+{% if r.peers %}
+<h3 style="margin:34px 0 6px">The {{r.category}} shelf — who AI can read</h3>
+<div class="card" style="padding:6px 22px">
+<table><tr><th>Brand</th><th>Score</th><th>Grade</th></tr>
+{% for d,s,g in r.peers %}<tr class="{{'yourrow' if d==r.domain else ''}}"><td>{% if d==r.domain %}▶ {% endif %}{{d}}</td><td>{{s}}/100</td><td class="g{{g}}">{{g}}</td></tr>{% endfor %}
+</table></div>
+{% endif %}
+
+<div class="card cta" style="margin-top:30px">
+<h3>Get the full 7-point audit of {{r.domain}}</h3>
+<p>This is the free scan. The paid audit adds live testing inside ChatGPT, Perplexity &amp; Copilot — the exact prices &amp; recommendations they give shoppers for your products — plus a fix roadmap ranked by revenue impact.</p>
+<form class="scan" method="post" action="/request" style="max-width:520px">
+<input type="hidden" name="domain" value="{{r.domain}}"><input type="hidden" name="score" value="{{r.score}}">
+<input name="email" type="email" placeholder="you@{{r.domain}}" required>
+<button type="submit">Send my full audit →</button></form>
+</div>
+<div class="foot">Free automated checks · <a href="/index-report">see the full Index</a> · <a href="/">scan another store</a><br>
+<a href="mailto:mahmood@canaishopyou.com">mahmood@canaishopyou.com</a></div>
+</div></body></html>"""
 
 BASE_DOC = """<!doctype html><html><head><title>CanAIShopYou</title>
 <meta name="viewport" content="width=device-width,initial-scale=1"><style>""" + BASE_CSS + """</style></head><body>{{ body|safe }}</body></html>"""
