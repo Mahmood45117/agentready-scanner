@@ -22,25 +22,35 @@ AI_BOTS = {
 }
 
 INDEX_ED1 = [
-    ("hexclad.com", 95, "A", "Nearly perfect — positioned to own AI cookware recommendations"),
     ("allbirds.com", 95, "A", "Clean across all checks"),
     ("athleticbrewing.com", 95, "A", "Clean across all checks"),
+    ("awaytravel.com", 95, "A", "Clean across all checks"),
+    ("casper.com", 95, "A", "Clean across all checks"),
+    ("glossier.com", 95, "A", "Clean across all checks"),
+    ("hexclad.com", 95, "A", "Nearly perfect — positioned to own AI cookware recommendations"),
+    ("jonesroadbeauty.com", 95, "A", "Clean across all checks"),
+    ("livemomentous.com", 95, "A", "Clean across all checks"),
     ("magicspoon.com", 95, "A", "Clean across all checks"),
+    ("trueclassictees.com", 95, "A", "Clean across all checks"),
     ("chubbiesshorts.com", 93, "A", "Healthiest of the original ten"),
     ("vuoriclothing.com", 92, "A", "Clean; catalog participation unclear"),
     ("bombas.com", 90, "A", "Healthy; catalog participation unclear"),
     ("fromourplace.com", 80, "B", "Product data missing offers block → hallucinated-price risk"),
     ("huel.com", 77, "B", "Price data incomplete → hallucinated-price risk"),
+    ("aloyoga.com", 65, "C", "No product structured data · Cloudflare risk"),
+    ("brooklinen.com", 65, "C", "No product structured data · Cloudflare risk"),
     ("gymshark.com", 65, "C", "No product structured data · Cloudflare risk"),
     ("mudwtr.com", 65, "C", "No product structured data · Cloudflare risk"),
-    ("brooklinen.com", 65, "C", "No product structured data · Cloudflare risk"),
     ("nutrafol.com", 60, "C", "No product structured data"),
-    ("ridge.com", 57, "C", "No product structured data · Cloudflare risk"),
     ("graza.co", 57, "C", "No product structured data"),
-    ("seed.com", 55, "C", "No product structured data"),
+    ("ridge.com", 57, "C", "No product structured data · Cloudflare risk"),
+    ("warbyparker.com", 57, "C", "No product structured data · Cloudflare risk"),
     ("ruggable.com", 55, "C", "No product structured data"),
+    ("seed.com", 55, "C", "No product structured data"),
     ("carawayhome.com", 40, "D", "Bot-wall starves AI of data · confirmed ChatGPT price hallucination"),
     ("drinkag1.com", 40, "D", "robots.txt unreachable · no product data"),
+    ("helixsleep.com", 40, "D", "robots.txt unreachable · no product data"),
+    ("lmnt.com", 40, "D", "robots.txt unreachable · no product data"),
     ("rhone.com", 35, "D", "robots.txt unreachable · Cloudflare risk · no product data"),
 ]
 
@@ -255,7 +265,7 @@ PAGE = """<!doctype html><html><head><title>Can AI Shop You? — Agent-Readiness
 <div class="tier"><b>$1,000<span class="per">/mo</span></b><div class="per">fix &amp; monitor</div><ul><li>Fix implementation</li><li>Weekly re-scans + alerts</li><li>Monthly report</li></ul></div>
 </div>
 <div class="card cta"><h3>The Agent-Ready Index</h3>
-<p>We publish quarterly agent-readiness scores for leading DTC brands.<br>Edition #1: <b>21 brands scanned — two-thirds scored below A.</b> One blocked itself out of ChatGPT entirely.</p>
+<p>We publish quarterly agent-readiness scores for leading DTC brands.<br>Edition #1: <b>30 brands scanned — two-thirds scored below A.</b> One blocked itself out of ChatGPT entirely.</p>
 <a class="btn" href="/index-report">Read the Index →</a></div>
 {% endif %}
 {% if r %}
@@ -277,7 +287,7 @@ INDEX_PAGE = """<!doctype html><html><head><title>The Agent-Ready Index — Edit
 <style>""" + BASE_CSS + """</style></head><body>
 """ + NAV + """
 <div class="hero"><h1>The <em>Agent-Ready</em> Index</h1>
-<p><b>Edition #1 — July 2026.</b> Twenty-one leading DTC brands, scanned for AI-shopping readiness.<br>
+<p><b>Edition #1 — July 2026.</b> Thirty leading DTC brands, scanned for AI-shopping readiness.<br>
 Headline finding: <b style="color:#ffbd2e">two-thirds score below A</b> — broken product data, blocked crawlers, invisible listings.</p></div>
 <div class="card"><table><tr><th>#</th><th>BRAND</th><th>SCORE</th><th>GRADE</th><th>KEY FINDING</th></tr>
 {% for i,(d,s,g,note) in rows %}<tr><td>{{i}}</td><td><b>{{d}}</b></td><td>{{s}}/100</td><td class="g{{g}}">{{g}}</td><td style="color:#8b93a7">{{note}}</td></tr>{% endfor %}
