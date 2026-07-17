@@ -66,6 +66,7 @@ INDEX_ED1 = [
     ("chubbiesshorts.com", 93, "A", "Healthiest of the original ten"),
     ("vuoriclothing.com", 92, "A", "Clean; catalog participation unclear"),
     ("bombas.com", 90, "A", "Healthy; catalog participation unclear"),
+    ("drinklmnt.com", 85, "A", "Healthy — robots open, product data readable"),
     ("fromourplace.com", 80, "B", "Product data missing offers block → hallucinated-price risk"),
     ("huel.com", 77, "B", "Price data incomplete → hallucinated-price risk"),
     ("aloyoga.com", 65, "C", "No product structured data · Cloudflare risk"),
@@ -81,7 +82,6 @@ INDEX_ED1 = [
     ("carawayhome.com", 40, "D", "Bot-wall starves AI of data · confirmed ChatGPT price hallucination"),
     ("drinkag1.com", 40, "D", "robots.txt unreachable · no product data"),
     ("helixsleep.com", 40, "D", "robots.txt unreachable · no product data"),
-    ("lmnt.com", 40, "D", "robots.txt unreachable · no product data"),
     ("rhone.com", 35, "D", "robots.txt unreachable · Cloudflare risk · no product data"),
 ]
 
