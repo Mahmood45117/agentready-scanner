@@ -22,16 +22,26 @@ AI_BOTS = {
 }
 
 INDEX_ED1 = [
-    ("chubbiesshorts.com", 93, "A", "Healthiest of the ten"),
+    ("hexclad.com", 95, "A", "Nearly perfect — positioned to own AI cookware recommendations"),
+    ("allbirds.com", 95, "A", "Clean across all checks"),
+    ("athleticbrewing.com", 95, "A", "Clean across all checks"),
+    ("magicspoon.com", 95, "A", "Clean across all checks"),
+    ("chubbiesshorts.com", 93, "A", "Healthiest of the original ten"),
+    ("vuoriclothing.com", 92, "A", "Clean; catalog participation unclear"),
     ("bombas.com", 90, "A", "Healthy; catalog participation unclear"),
     ("huel.com", 77, "B", "Price data incomplete → hallucinated-price risk"),
     ("gymshark.com", 65, "C", "No product structured data · Cloudflare risk"),
     ("mudwtr.com", 65, "C", "No product structured data · Cloudflare risk"),
     ("brooklinen.com", 65, "C", "No product structured data · Cloudflare risk"),
     ("nutrafol.com", 60, "C", "No product structured data"),
-    ("ridgewallet.com", 57, "C", "No product structured data · Cloudflare risk"),
-    ("caraway.com", 40, "D", "robots.txt unreachable · no product data"),
+    ("ridge.com", 57, "C", "No product structured data · Cloudflare risk"),
+    ("graza.co", 57, "C", "No product structured data"),
+    ("seed.com", 55, "C", "No product structured data"),
+    ("ruggable.com", 55, "C", "No product structured data"),
+    ("carawayhome.com", 40, "D", "Bot-wall starves AI of data · confirmed ChatGPT price hallucination"),
     ("drinkag1.com", 40, "D", "robots.txt unreachable · no product data"),
+    ("rhone.com", 35, "D", "robots.txt unreachable · Cloudflare risk · no product data"),
+    ("ourplace.com", 22, "F", "BLOCKS AI shopping bots in robots.txt — invisible in ChatGPT"),
 ]
 
 def fetch(url):
@@ -192,12 +202,14 @@ NAV = """<div class="nav"><a class="brand" href="/">🔍 Can AI Shop You?</a>
 PAGE = """<!doctype html><html><head><title>Can AI Shop You? — AgentReady Scanner</title>
 <meta name="viewport" content="width=device-width,initial-scale=1"><style>""" + BASE_CSS + """</style></head><body>
 """ + NAV + """
-<div class="hero"><h1>Can AI shop you?</h1>
-<p>AI assistants now recommend and buy products for millions of shoppers.<br>
-AI-referred retail traffic is up <span class="stat">+1,324%</span> and converts <span class="stat">42% better</span> — if your store is visible to it.<br>
-<b>8 of 10 leading DTC brands we scanned aren't.</b> Are you?</p>
+<div class="hero"><h1>AI assistants are already sending shoppers to stores. Is yours one of them?</h1>
+<p>ChatGPT, Perplexity &amp; Copilot now recommend products to millions — traffic that's up <span class="stat">+1,324%</span> and converts <span class="stat">42% better</span>.<br>
+We test how they see your store: what they say about you, whether they quote your prices right — <b>or make them up</b>.<br>
+<b>8 of 10 leading DTC brands we scanned are broken for AI shopping.</b> Find out in 30 seconds:</p>
 <form class="scan" method="post"><input name="domain" placeholder="yourstore.com" value="{{domain or ''}}" required>
-<button>Scan free</button></form></div>
+<button>Scan free</button></form>
+<p style="margin-top:14px;color:#525a6e;font-size:.9em">🔍 Scan the plumbing → 🤖 interrogate the AIs → 📈 get the fix roadmap, ranked by revenue impact<br>
+<i>Coming soon: <b>CANI</b> — our AI shopper that walks your store like a customer and shows you where it gets stuck.</i></p></div>
 {% if r %}
 <div class="card"><span class="score">{{r.score}}/100</span> <span class="grade">grade {{r.grade}} — {{r.domain}}</span></div>
 {% for name,status,pts,detail in r.checks %}<div class="card"><b class="{{status}}">{{status}}</b> &nbsp; <b>{{name}}</b> <span class="grade" style="font-size:.85em">({{pts}} pts)</span><br><span style="color:#8b93a7">{{detail}}</span></div>{% endfor %}
@@ -212,8 +224,8 @@ INDEX_PAGE = """<!doctype html><html><head><title>The Agent-Ready Index — Edit
 <meta name="viewport" content="width=device-width,initial-scale=1"><style>""" + BASE_CSS + """</style></head><body>
 """ + NAV + """
 <div class="hero"><h1>The Agent-Ready Index</h1>
-<p><b>Edition #1 — July 2026.</b> Ten leading DTC brands, scanned for AI-shopping readiness.<br>
-Headline finding: <span class="stat">80% have missing or broken product data</span> for AI surfaces.</p></div>
+<p><b>Edition #1 — July 2026 (updated).</b> Twenty-one leading DTC brands, scanned for AI-shopping readiness.<br>
+Headline finding: <span class="stat">two-thirds score below A</span> — broken product data, blocked crawlers, invisible listings.</p></div>
 <div class="card"><table><tr><th>#</th><th>Brand</th><th>Score</th><th>Grade</th><th>Key finding</th></tr>
 {% for i,(d,s,g,note) in rows %}<tr><td>{{i}}</td><td><b>{{d}}</b></td><td>{{s}}/100</td><td class="g{{g}}">{{g}}</td><td style="color:#8b93a7">{{note}}</td></tr>{% endfor %}
 </table></div>
