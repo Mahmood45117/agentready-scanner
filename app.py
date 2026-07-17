@@ -8,7 +8,7 @@ import json, re, sys
 import requests
 from flask import Flask, request, render_template_string
 
-AUDIT_EMAIL = "mkb8630963@gmail.com"   # <- where "request full audit" clicks land
+AUDIT_EMAIL = "mahmood@canaishopyou.com"   # <- where "request full audit" clicks land
 UA = "AgentReadyScanner/2.0 (+https://canaishopyou.com)"
 TIMEOUT = 12
 
@@ -176,64 +176,118 @@ def scan(domain):
     return {"domain": domain, "score": score, "grade": grade, "checks": checks}
 
 BASE_CSS = """
-*{box-sizing:border-box}body{font-family:-apple-system,'Segoe UI',sans-serif;max-width:860px;margin:0 auto;padding:0 20px 60px;background:#0a0d14;color:#e8eaf0}
-a{color:#7c9aff}.nav{display:flex;justify-content:space-between;align-items:center;padding:22px 0;font-weight:700}
-.nav .brand{font-size:1.15em;color:#fff;text-decoration:none}.nav .links a{margin-left:18px;font-weight:500;text-decoration:none;color:#8b93a7}
-.hero{text-align:center;padding:40px 0 26px}.hero h1{font-size:2.6em;margin:0 0 10px;background:linear-gradient(90deg,#7c9aff,#4ade80);-webkit-background-clip:text;background-clip:text;color:transparent}
-.hero p{color:#8b93a7;font-size:1.15em;margin:0 0 26px}
-form.scan{display:flex;gap:10px;max-width:560px;margin:0 auto}
-input[name=domain]{flex:1;padding:15px 18px;font-size:1.05em;border-radius:12px;border:1px solid #2a3040;background:#141926;color:#fff;outline:none}
-button{padding:15px 30px;font-size:1.05em;font-weight:700;border-radius:12px;border:0;background:linear-gradient(90deg,#4f7cff,#6c5ce7);color:#fff;cursor:pointer}
-.stat{color:#4ade80;font-weight:600}
-.card{background:#141926;border:1px solid #232a3b;border-radius:14px;padding:20px;margin:14px 0}
-.PASS{color:#4ade80}.FAIL{color:#ff5f56}.WARN{color:#ffbd2e}.INFO{color:#8b93a7}
-.score{font-size:3.4em;font-weight:800}.grade{font-size:1.25em;color:#8b93a7}
-.cta{background:linear-gradient(135deg,#1a2140,#141926);border:1px solid #34406b;text-align:center}
-.cta h3{margin:4px 0 8px;font-size:1.35em}.cta p{color:#8b93a7;margin:0 0 16px}
-.cta a.btn{display:inline-block;padding:14px 28px;border-radius:12px;background:linear-gradient(90deg,#4f7cff,#6c5ce7);color:#fff;font-weight:700;text-decoration:none}
-table{width:100%;border-collapse:collapse}td,th{padding:10px 8px;text-align:left;border-bottom:1px solid #232a3b}th{color:#8b93a7;font-weight:600}
-.gA{color:#4ade80;font-weight:800}.gB{color:#a3e635;font-weight:800}.gC{color:#ffbd2e;font-weight:800}.gD,.gF{color:#ff5f56;font-weight:800}
-.foot{text-align:center;color:#525a6e;margin-top:44px;font-size:.9em}
+*{box-sizing:border-box;margin:0}
+:root{--bg:#07090f;--card:#10141f;--card2:#151b2a;--line:#1f2740;--txt:#eef1f8;--mut:#8b93a7;--dim:#525a6e;
+--grad:linear-gradient(93deg,#6d8dff,#3fd68c);--grad2:linear-gradient(135deg,#141b33,#10141f)}
+body{font-family:-apple-system,'SF Pro Display','Segoe UI',sans-serif;background:
+radial-gradient(1200px 500px at 50% -10%,#131b36 0%,var(--bg) 60%);color:var(--txt);min-height:100vh}
+.wrap{max-width:880px;margin:0 auto;padding:0 22px 70px}
+.nav{display:flex;justify-content:space-between;align-items:center;padding:24px 0}
+.nav .brand{font-size:1.2em;font-weight:800;color:#fff;text-decoration:none;letter-spacing:-.3px}
+.nav .brand span{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+.nav .links a{margin-left:22px;font-weight:600;font-size:.95em;text-decoration:none;color:var(--mut)}
+.nav .links a:hover{color:#fff}
+.hero{text-align:center;padding:52px 0 30px}
+.hero h1{font-size:2.7em;line-height:1.12;letter-spacing:-1.2px;margin:0 auto 18px;max-width:800px}
+.hero h1 em{font-style:normal;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero p{color:var(--mut);font-size:1.12em;line-height:1.55;max-width:640px;margin:0 auto 30px}
+.statrow{display:flex;gap:14px;justify-content:center;margin:0 0 34px;flex-wrap:wrap}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 22px;text-align:center}
+.stat b{display:block;font-size:1.5em;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+.stat span{color:var(--dim);font-size:.85em}
+form.scan{display:flex;gap:10px;max-width:600px;margin:0 auto}
+input[name=domain]{flex:1;padding:17px 20px;font-size:1.05em;border-radius:14px;border:1px solid var(--line);background:var(--card);color:#fff;outline:none;transition:border .2s}
+input[name=domain]:focus{border-color:#6d8dff}
+button,.btn{padding:17px 32px;font-size:1.05em;font-weight:700;border-radius:14px;border:0;background:var(--grad);color:#06131a;cursor:pointer;text-decoration:none;display:inline-block}
+button:hover,.btn:hover{filter:brightness(1.1)}
+.steps{display:flex;gap:14px;margin:40px 0 0;flex-wrap:wrap}
+.step{flex:1;min-width:200px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px}
+.step .n{font-size:.8em;color:var(--dim);font-weight:700;letter-spacing:1px}
+.step h4{margin:8px 0 6px;font-size:1.05em}
+.step p{color:var(--mut);font-size:.92em;line-height:1.5}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px;margin:14px 0}
+.PASS{color:#3fd68c}.FAIL{color:#ff5f56}.WARN{color:#ffbd2e}.INFO{color:#8b93a7}
+.score{font-size:3.6em;font-weight:800;letter-spacing:-2px}.grade{font-size:1.25em;color:var(--mut)}
+.cta{background:var(--grad2);border:1px solid #2c3760;text-align:center;padding:34px 26px}
+.cta h3{margin:0 0 10px;font-size:1.45em;letter-spacing:-.5px}
+.cta p{color:var(--mut);margin:0 0 20px;line-height:1.55}
+.price{display:flex;gap:14px;justify-content:center;margin:26px 0 8px;flex-wrap:wrap}
+.tier{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px 26px;min-width:230px;text-align:left}
+.tier b{font-size:1.5em}.tier .per{color:var(--dim);font-size:.9em}
+.tier ul{margin:12px 0 0;padding-left:18px;color:var(--mut);font-size:.9em;line-height:1.7}
+table{width:100%;border-collapse:collapse}td,th{padding:11px 8px;text-align:left;border-bottom:1px solid var(--line)}
+th{color:var(--dim);font-weight:600;font-size:.85em;letter-spacing:.5px}
+.gA{color:#3fd68c;font-weight:800}.gB{color:#a3e635;font-weight:800}.gC{color:#ffbd2e;font-weight:800}.gD,.gF{color:#ff5f56;font-weight:800}
+.foot{text-align:center;color:var(--dim);margin-top:56px;font-size:.9em;line-height:1.8}
+.foot a{color:var(--mut)}
+@media(max-width:640px){.hero h1{font-size:2em}form.scan{flex-direction:column}}
 """
 
-NAV = """<div class="nav"><a class="brand" href="/">🔍 Can AI Shop You?</a>
-<span class="links"><a href="/">Scanner</a><a href="/index-report">The Index</a></span></div>"""
+NAV = """<div class="wrap"><div class="nav"><a class="brand" href="/">🔍 Can<span>AI</span>ShopYou</a>
+<span class="links"><a href="/">Scanner</a><a href="/index-report">The Index</a><a href="mailto:mahmood@canaishopyou.com">Contact</a></span></div>"""
 
-PAGE = """<!doctype html><html><head><title>Can AI Shop You? — AgentReady Scanner</title>
-<meta name="viewport" content="width=device-width,initial-scale=1"><style>""" + BASE_CSS + """</style></head><body>
+PAGE = """<!doctype html><html><head><title>Can AI Shop You? — Agent-Readiness Scanner & Index</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta property="og:title" content="Can AI Shop You?">
+<meta property="og:description" content="AI assistants recommend stores to millions of shoppers. Two-thirds of top DTC brands are broken for them. Scan yours free in 30 seconds.">
+<meta name="description" content="Free agent-readiness scan: can ChatGPT, Perplexity & Copilot see and sell your store? Publisher of the Agent-Ready Index.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔍</text></svg>">
+<style>""" + BASE_CSS + """</style></head><body>
 """ + NAV + """
-<div class="hero"><h1>AI assistants are already sending shoppers to stores. Is yours one of them?</h1>
-<p>ChatGPT, Perplexity &amp; Copilot now recommend products to millions — traffic that's up <span class="stat">+1,324%</span> and converts <span class="stat">42% better</span>.<br>
-We test how they see your store: what they say about you, whether they quote your prices right — <b>or make them up</b>.<br>
-<b>8 of 10 leading DTC brands we scanned are broken for AI shopping.</b> Find out in 30 seconds:</p>
+<div class="hero"><h1>AI assistants are already sending shoppers to stores.<br><em>Is yours one of them?</em></h1>
+<p>ChatGPT, Perplexity &amp; Copilot now recommend and price-check products for millions. We test exactly how they see your store — and what they get wrong.</p>
+<div class="statrow">
+<div class="stat"><b>+1,324%</b><span>AI-referred retail traffic since Oct '24</span></div>
+<div class="stat"><b>42%</b><span>better conversion vs average</span></div>
+<div class="stat"><b>2/3</b><span>of 21 top DTC brands scored below A</span></div>
+</div>
 <form class="scan" method="post"><input name="domain" placeholder="yourstore.com" value="{{domain or ''}}" required>
-<button>Scan free</button></form>
-<p style="margin-top:14px;color:#525a6e;font-size:.9em">🔍 Scan the plumbing → 🤖 interrogate the AIs → 📈 get the fix roadmap, ranked by revenue impact<br>
-<i>Coming soon: <b>CANI</b> — our AI shopper that walks your store like a customer and shows you where it gets stuck.</i></p></div>
+<button>Scan free</button></form></div>
+{% if not r %}
+<div class="steps">
+<div class="step"><span class="n">STEP 1</span><h4>🔍 Scan the plumbing</h4><p>Crawler access, bot-walls, product data, catalog rails — the machine layer AI depends on. Free, 30 seconds.</p></div>
+<div class="step"><span class="n">STEP 2</span><h4>🤖 Interrogate the AIs</h4><p>The full audit tests your store live inside ChatGPT, Perplexity &amp; Copilot — what they say, what they hallucinate.</p></div>
+<div class="step"><span class="n">STEP 3</span><h4>📈 Fix what costs you</h4><p>Findings ranked by revenue impact, a 30-day roadmap, and a re-scan to prove the fix worked.</p></div>
+</div>
+<div class="price">
+<div class="tier"><b>Free</b><div class="per">instant scan</div><ul><li>5 automated checks</li><li>Scored report card</li><li>No signup</li></ul></div>
+<div class="tier"><b>$500</b><div class="per">full audit · 5 days</div><ul><li>Live AI-surface testing</li><li>Hallucination hunt</li><li>Revenue-ranked fix roadmap</li></ul></div>
+<div class="tier"><b>$1,000<span class="per">/mo</span></b><div class="per">fix &amp; monitor</div><ul><li>Fix implementation</li><li>Weekly re-scans + alerts</li><li>Monthly report</li></ul></div>
+</div>
+<div class="card cta"><h3>The Agent-Ready Index</h3>
+<p>We publish quarterly agent-readiness scores for leading DTC brands.<br>Edition #1: <b>21 brands scanned — two-thirds scored below A.</b> One blocked itself out of ChatGPT entirely.</p>
+<a class="btn" href="/index-report">Read the Index →</a></div>
+{% endif %}
 {% if r %}
 <div class="card"><span class="score">{{r.score}}/100</span> <span class="grade">grade {{r.grade}} — {{r.domain}}</span></div>
 {% for name,status,pts,detail in r.checks %}<div class="card"><b class="{{status}}">{{status}}</b> &nbsp; <b>{{name}}</b> <span class="grade" style="font-size:.85em">({{pts}} pts)</span><br><span style="color:#8b93a7">{{detail}}</span></div>{% endfor %}
 <div class="card cta"><h3>This was the free scan — the machine layer.</h3>
-<p>The <b>full audit</b> tests your store live inside ChatGPT, Perplexity &amp; Copilot: what they actually say about you,<br>whether they quote your prices right (or hallucinate them), and your feed rails — with a prioritized fix roadmap.</p>
+<p>The <b>full audit ($500)</b> tests your store live inside ChatGPT, Perplexity &amp; Copilot: what they actually say about you,<br>whether they quote your prices right (or hallucinate them) — with a fix roadmap ranked by revenue impact. Delivered in 5 days.</p>
 <a class="btn" href="mailto:""" + AUDIT_EMAIL + """?subject=Full%20audit%20request%20—%20{{r.domain}}%20({{r.score}}/100)&body=Scanned%20{{r.domain}}%20on%20canaishopyou.com%20—%20score%20{{r.score}}/100.%20I%20want%20the%20full%207-point%20audit.">Request the full audit →</a></div>
 {% endif %}
-<div class="foot">canaishopyou.com · independent agent-readiness audits &amp; the Agent-Ready Index</div>
-</body></html>"""
+<div class="foot">CanAIShopYou · independent agent-readiness audits &amp; the Agent-Ready Index<br>
+<a href="mailto:mahmood@canaishopyou.com">mahmood@canaishopyou.com</a> · <a href="/index-report">Index Edition #1</a></div>
+</div></body></html>"""
 
 INDEX_PAGE = """<!doctype html><html><head><title>The Agent-Ready Index — Edition #1</title>
-<meta name="viewport" content="width=device-width,initial-scale=1"><style>""" + BASE_CSS + """</style></head><body>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta property="og:title" content="The Agent-Ready Index — Edition #1">
+<meta property="og:description" content="21 leading DTC brands scored for AI-shopping readiness. Two-thirds below A. One brand blocked itself out of ChatGPT entirely.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔍</text></svg>">
+<style>""" + BASE_CSS + """</style></head><body>
 """ + NAV + """
-<div class="hero"><h1>The Agent-Ready Index</h1>
-<p><b>Edition #1 — July 2026 (updated).</b> Twenty-one leading DTC brands, scanned for AI-shopping readiness.<br>
-Headline finding: <span class="stat">two-thirds score below A</span> — broken product data, blocked crawlers, invisible listings.</p></div>
-<div class="card"><table><tr><th>#</th><th>Brand</th><th>Score</th><th>Grade</th><th>Key finding</th></tr>
+<div class="hero"><h1>The <em>Agent-Ready</em> Index</h1>
+<p><b>Edition #1 — July 2026.</b> Twenty-one leading DTC brands, scanned for AI-shopping readiness.<br>
+Headline finding: <b style="color:#ffbd2e">two-thirds score below A</b> — broken product data, blocked crawlers, invisible listings.</p></div>
+<div class="card"><table><tr><th>#</th><th>BRAND</th><th>SCORE</th><th>GRADE</th><th>KEY FINDING</th></tr>
 {% for i,(d,s,g,note) in rows %}<tr><td>{{i}}</td><td><b>{{d}}</b></td><td>{{s}}/100</td><td class="g{{g}}">{{g}}</td><td style="color:#8b93a7">{{note}}</td></tr>{% endfor %}
 </table></div>
 <div class="card cta"><h3>Is your store on the wrong half of this table?</h3>
-<p>Run the free scan — or request the full audit with live AI-surface testing.</p>
+<p>Run the free scan — or request the full audit with live AI-surface testing inside ChatGPT, Perplexity &amp; Copilot.</p>
 <a class="btn" href="/">Scan your store free →</a></div>
-<div class="foot">Methodology: automated deterministic checks (robots/CDN/llms.txt/catalog rail/structured data). Edition #2: Q4 2026.</div>
-</body></html>"""
+<div class="foot">Methodology: automated deterministic checks (crawler access · CDN posture · llms.txt · catalog rails · structured data).<br>Live AI-surface findings (hallucination catches) noted where verified. Edition #2: Q4 2026.<br>
+<a href="mailto:mahmood@canaishopyou.com">mahmood@canaishopyou.com</a></div>
+</div></body></html>"""
 
 app = Flask(__name__)
 
