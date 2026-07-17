@@ -249,55 +249,69 @@ def scan(domain):
 
 BASE_CSS = """
 *{box-sizing:border-box;margin:0}
-:root{--bg:#07090f;--card:#10141f;--card2:#151b2a;--line:#1f2740;--txt:#eef1f8;--mut:#8b93a7;--dim:#525a6e;
---grad:linear-gradient(93deg,#6d8dff,#3fd68c);--grad2:linear-gradient(135deg,#141b33,#10141f)}
-body{font-family:-apple-system,'SF Pro Display','Segoe UI',sans-serif;background:
-radial-gradient(1200px 500px at 50% -10%,#131b36 0%,var(--bg) 60%);color:var(--txt);min-height:100vh}
-.wrap{max-width:880px;margin:0 auto;padding:0 22px 70px}
-.nav{display:flex;justify-content:space-between;align-items:center;padding:24px 0}
-.nav .brand{font-size:1.2em;font-weight:800;color:#fff;text-decoration:none;letter-spacing:-.3px}
-.nav .brand span{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
-.nav .links a{margin-left:22px;font-weight:600;font-size:.95em;text-decoration:none;color:var(--mut)}
-.nav .links a:hover{color:#fff}
-.hero{text-align:center;padding:52px 0 30px}
-.hero h1{font-size:2.7em;line-height:1.12;letter-spacing:-1.2px;margin:0 auto 18px;max-width:800px}
-.hero h1 em{font-style:normal;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
-.hero p{color:var(--mut);font-size:1.12em;line-height:1.55;max-width:640px;margin:0 auto 30px}
-.statrow{display:flex;gap:14px;justify-content:center;margin:0 0 34px;flex-wrap:wrap}
-.stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 22px;text-align:center}
-.stat b{display:block;font-size:1.5em;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
-.stat span{color:var(--dim);font-size:.85em}
-form.scan{display:flex;gap:10px;max-width:600px;margin:0 auto}
-input[name=domain],input[type=email]{flex:1;padding:17px 20px;font-size:1.05em;border-radius:14px;border:1px solid var(--line);background:var(--card);color:#fff;outline:none;transition:border .2s}
-input[name=domain]:focus,input[type=email]:focus{border-color:#6d8dff}
-.repcard{background:var(--grad2);border:1px solid #2c3760;border-radius:18px;padding:34px 30px;text-align:center;margin:20px 0}
-.repcard .score{font-size:4.4em}
-.rank{color:var(--mut);font-size:1.05em;margin-top:6px}
-.yourrow{background:#1a2140!important}
-.yourrow td{color:#fff!important;font-weight:700}
-button,.btn{padding:17px 32px;font-size:1.05em;font-weight:700;border-radius:14px;border:0;background:var(--grad);color:#06131a;cursor:pointer;text-decoration:none;display:inline-block}
-button:hover,.btn:hover{filter:brightness(1.1)}
-.steps{display:flex;gap:14px;margin:40px 0 0;flex-wrap:wrap}
-.step{flex:1;min-width:200px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px}
-.step .n{font-size:.8em;color:var(--dim);font-weight:700;letter-spacing:1px}
-.step h4{margin:8px 0 6px;font-size:1.05em}
-.step p{color:var(--mut);font-size:.92em;line-height:1.5}
-.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px;margin:14px 0}
-.PASS{color:#3fd68c}.FAIL{color:#ff5f56}.WARN{color:#ffbd2e}.INFO{color:#8b93a7}
-.score{font-size:3.6em;font-weight:800;letter-spacing:-2px}.grade{font-size:1.25em;color:var(--mut)}
-.cta{background:var(--grad2);border:1px solid #2c3760;text-align:center;padding:34px 26px}
-.cta h3{margin:0 0 10px;font-size:1.45em;letter-spacing:-.5px}
-.cta p{color:var(--mut);margin:0 0 20px;line-height:1.55}
-.price{display:flex;gap:14px;justify-content:center;margin:26px 0 8px;flex-wrap:wrap}
-.tier{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px 26px;min-width:230px;text-align:left}
-.tier b{font-size:1.5em}.tier .per{color:var(--dim);font-size:.9em}
-.tier ul{margin:12px 0 0;padding-left:18px;color:var(--mut);font-size:.9em;line-height:1.7}
-table{width:100%;border-collapse:collapse}td,th{padding:11px 8px;text-align:left;border-bottom:1px solid var(--line)}
-th{color:var(--dim);font-weight:600;font-size:.85em;letter-spacing:.5px}
-.gA{color:#3fd68c;font-weight:800}.gB{color:#a3e635;font-weight:800}.gC{color:#ffbd2e;font-weight:800}.gD,.gF{color:#ff5f56;font-weight:800}
-.foot{text-align:center;color:var(--dim);margin-top:56px;font-size:.9em;line-height:1.8}
-.foot a{color:var(--mut)}
-@media(max-width:640px){.hero h1{font-size:2em}form.scan{flex-direction:column}}
+:root{--paper:#F3F0E8;--card:#FFFFFF;--ink:#111111;--mut:#5A564C;--dim:#8C877A;--line:#111111;--accent:#FF4A1C;
+--gA:#0E9F5A;--gB:#5C8A00;--gC:#D97A00;--gD:#E23B2E}
+body{font-family:-apple-system,'SF Pro Display','Segoe UI',Helvetica,Arial,sans-serif;background:var(--paper);color:var(--ink);min-height:100vh;-webkit-font-smoothing:antialiased}
+button,input,select,textarea{font-family:inherit}
+.wrap{max-width:940px;margin:0 auto;padding:0 22px 90px}
+.nav{display:flex;justify-content:space-between;align-items:center;padding:22px 0;border-bottom:3px solid var(--ink)}
+.nav .brand{font-size:1.3em;font-weight:900;color:var(--ink);text-decoration:none;letter-spacing:-.5px}
+.nav .brand span{color:var(--accent)}
+.nav .links a{margin-left:20px;font-weight:800;font-size:.8em;text-transform:uppercase;letter-spacing:.5px;text-decoration:none;color:var(--ink)}
+.nav .links a:hover{color:var(--accent)}
+.hero{text-align:center;padding:62px 0 34px}
+.hero h1{font-size:clamp(2.4em,6vw,4.6em);line-height:.98;letter-spacing:-2.5px;font-weight:900;margin:0 auto 22px;max-width:900px}
+.hero h1 em{font-style:normal;background:var(--accent);color:#fff;padding:0 .1em;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+.hero p{color:var(--mut);font-size:1.16em;line-height:1.5;max-width:620px;margin:0 auto 32px;font-weight:500}
+.statrow{display:flex;gap:14px;justify-content:center;margin:0 0 36px;flex-wrap:wrap}
+.stat{background:var(--card);border:2px solid var(--ink);border-radius:10px;padding:16px 24px;text-align:center;box-shadow:4px 4px 0 var(--ink)}
+.stat b{display:block;font-size:1.7em;font-weight:900;letter-spacing:-1px;color:var(--ink)}
+.stat span{color:var(--mut);font-size:.8em;font-weight:600}
+form.scan{display:flex;gap:12px;max-width:600px;margin:0 auto}
+input[name=domain],input[type=email]{flex:1;padding:16px 18px;font-size:1.05em;font-weight:600;border-radius:8px;border:2px solid var(--ink);background:var(--card);color:var(--ink);outline:none}
+input::placeholder{color:var(--dim)}
+input[name=domain]:focus,input[type=email]:focus{box-shadow:4px 4px 0 var(--accent)}
+button,.btn{padding:16px 30px;font-size:1.02em;font-weight:800;border-radius:8px;border:2px solid var(--ink);background:var(--ink);color:var(--paper);cursor:pointer;text-decoration:none;display:inline-block;box-shadow:4px 4px 0 var(--accent);transition:transform .08s,box-shadow .08s}
+button:hover,.btn:hover{transform:translate(-2px,-2px);box-shadow:6px 6px 0 var(--accent)}
+button:active,.btn:active{transform:translate(2px,2px);box-shadow:2px 2px 0 var(--accent)}
+.steps{display:flex;gap:16px;margin:44px 0 0;flex-wrap:wrap}
+.step{flex:1;min-width:210px;background:var(--card);border:2px solid var(--ink);border-radius:10px;padding:24px;box-shadow:5px 5px 0 var(--ink)}
+.step .n{font-size:.72em;color:var(--accent);font-weight:900;letter-spacing:1.5px}
+.step h4{margin:10px 0 8px;font-size:1.12em;font-weight:800}
+.step p{color:var(--mut);font-size:.92em;line-height:1.55;font-weight:500}
+.card{background:var(--card);border:2px solid var(--ink);border-radius:10px;padding:24px;margin:16px 0;box-shadow:5px 5px 0 var(--ink)}
+.pill{display:inline-block;padding:3px 13px;border-radius:999px;font-weight:900;font-size:.82em;color:#fff;border:2px solid var(--ink);vertical-align:middle}
+.pA{background:var(--gA)}.pB{background:var(--gB)}.pC{background:var(--gC)}.pD,.pF{background:var(--gD)}
+.PASS,.FAIL,.WARN,.INFO{display:inline-block;padding:2px 10px;border-radius:6px;font-size:.76em;font-weight:900;color:#fff;border:2px solid var(--ink);letter-spacing:.3px}
+.PASS{background:var(--gA)}.FAIL{background:var(--gD)}.WARN{background:var(--gC)}.INFO{background:var(--dim)}
+.score{font-size:3.8em;font-weight:900;letter-spacing:-3px;line-height:1}
+.cA{color:var(--gA)}.cB{color:var(--gB)}.cC{color:var(--gC)}.cD,.cF{color:var(--gD)}
+.gA{color:var(--gA);font-weight:900}.gB{color:var(--gB);font-weight:900}.gC{color:var(--gC);font-weight:900}.gD,.gF{color:var(--gD);font-weight:900}
+.grade{font-size:1.05em;color:var(--mut);font-weight:700}
+.dom{font-size:1.1em;font-weight:800}.outof{font-size:.4em;font-weight:800;color:var(--dim);letter-spacing:0}
+.cta{background:var(--ink);color:var(--paper);border:2px solid var(--ink);border-radius:10px;text-align:center;padding:38px 28px;box-shadow:6px 6px 0 var(--accent)}
+.cta h3{margin:0 0 12px;font-size:1.55em;letter-spacing:-.8px;font-weight:900;color:#fff}
+.cta p{color:#cfc9bb;margin:0 0 22px;line-height:1.55;font-weight:500}
+.cta a.btn,.cta button{background:var(--accent);color:#fff;border-color:#fff;box-shadow:4px 4px 0 #fff}
+.cta a.btn:hover,.cta button:hover{box-shadow:6px 6px 0 #fff}
+.price{display:flex;gap:16px;justify-content:center;margin:28px 0 8px;flex-wrap:wrap}
+.tier{background:var(--card);border:2px solid var(--ink);border-radius:10px;padding:24px 26px;min-width:230px;text-align:left;box-shadow:5px 5px 0 var(--ink)}
+.tier:nth-child(2){box-shadow:5px 5px 0 var(--accent)}
+.tier b{font-size:1.7em;font-weight:900;letter-spacing:-1px}.tier .per{color:var(--dim);font-size:.82em;font-weight:600}
+.tier ul{margin:14px 0 0;padding-left:18px;color:var(--mut);font-size:.9em;line-height:1.8;font-weight:500}
+table{width:100%;border-collapse:collapse}
+td,th{padding:13px 8px;text-align:left;border-bottom:2px solid #E7E3D8}
+th{color:var(--ink);font-weight:900;font-size:.76em;letter-spacing:.6px;text-transform:uppercase;border-bottom:3px solid var(--ink)}
+td a{color:var(--ink);text-decoration:none;font-weight:800;border-bottom:2px solid var(--accent)}
+td a:hover{background:var(--accent);color:#fff}
+.repcard{background:var(--card);border:3px solid var(--ink);border-radius:14px;padding:38px 30px;text-align:center;margin:22px 0;box-shadow:8px 8px 0 var(--accent)}
+.repcard .score{font-size:clamp(3.4em,9vw,5em)}
+.rank{color:var(--mut);font-size:1.05em;margin-top:12px;font-weight:600}
+.yourrow{background:#FBEAE7!important}
+.yourrow td{color:var(--ink)!important;font-weight:900}
+.foot{text-align:center;color:var(--dim);margin-top:60px;font-size:.86em;line-height:1.9;font-weight:500}
+.foot a{color:var(--mut);font-weight:700}
+@media(max-width:640px){.hero h1{letter-spacing:-1.5px}form.scan{flex-direction:column}.card,.step,.stat,.tier{box-shadow:4px 4px 0 var(--ink)}}
 """
 
 NAV = """<div class="wrap"><div class="nav"><a class="brand" href="/">🔍 Can<span>AI</span>ShopYou</a>
@@ -336,13 +350,13 @@ PAGE = """<!doctype html><html><head><title>Can AI Shop You? — Agent-Readiness
 <a class="btn" href="/index-report">Read the Index →</a></div>
 {% endif %}
 {% if r %}
-<div class="card"><span class="score">{{r.score}}/100</span> <span class="grade">grade {{r.grade}} — {{r.domain}}</span></div>
-{% for name,status,pts,detail in r.checks %}<div class="card"><b class="{{status}}">{{status}}</b> &nbsp; <b>{{name}}</b> <span class="grade" style="font-size:.85em">({{pts}} pts)</span><br><span style="color:#8b93a7">{{detail}}</span></div>{% endfor %}
+<div class="card" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap"><span class="score c{{r.grade}}">{{r.score}}<span class="outof">/100</span></span> <span class="pill p{{r.grade}}" style="font-size:1em;padding:6px 16px">GRADE {{r.grade}}</span> <span class="dom">{{r.domain}}</span></div>
+{% for name,status,pts,detail in r.checks %}<div class="card"><span class="{{status}}">{{status}}</span> &nbsp; <b>{{name}}</b> <span class="grade" style="font-size:.85em">({{pts}} pts)</span><br><span style="color:var(--mut)">{{detail}}</span></div>{% endfor %}
 <div class="card cta"><h3>This was the free scan — the machine layer.</h3>
 <p>The <b>full audit ($500)</b> tests your store live inside ChatGPT, Perplexity &amp; Copilot: what they actually say about you,<br>whether they quote your prices right (or hallucinate them) — with a fix roadmap ranked by revenue impact. Delivered in 5 days.</p>
 <form method="post" action="/request" style="display:flex;gap:10px;max-width:460px;margin:0 auto;flex-wrap:wrap;justify-content:center">
 <input type="hidden" name="domain" value="{{r.domain}}"><input type="hidden" name="score" value="{{r.score}}">
-<input name="email" type="email" placeholder="you@yourstore.com" required style="flex:1;min-width:220px;padding:14px 16px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:#fff">
+<input name="email" type="email" placeholder="you@yourstore.com" required style="flex:1;min-width:220px">
 <button>Request full audit →</button></form>
 <p style="margin-top:12px;font-size:.85em;color:var(--dim)">or email <a href="mailto:mahmood@canaishopyou.com">mahmood@canaishopyou.com</a></p></div>
 {% endif %}
@@ -359,9 +373,9 @@ INDEX_PAGE = """<!doctype html><html><head><title>The Agent-Ready Index — Edit
 """ + NAV + """
 <div class="hero"><h1>The <em>Agent-Ready</em> Index</h1>
 <p><b>Edition #1 — July 2026.</b> Thirty leading DTC brands, scanned for AI-shopping readiness.<br>
-Headline finding: <b style="color:#ffbd2e">two-thirds score below A</b> — broken product data, blocked crawlers, invisible listings.</p></div>
+Headline finding: <b style="color:var(--accent)">two-thirds score below A</b> — broken product data, blocked crawlers, invisible listings.</p></div>
 <div class="card"><table><tr><th>#</th><th>BRAND</th><th>SCORE</th><th>GRADE</th><th>KEY FINDING</th></tr>
-{% for i,(d,s,g,note) in rows %}<tr><td>{{i}}</td><td><b><a href="/report/{{d}}" style="color:#eef1f8;text-decoration:none;border-bottom:1px dotted #2c3760">{{d}}</a></b></td><td>{{s}}/100</td><td class="g{{g}}">{{g}}</td><td style="color:#8b93a7">{{note}}</td></tr>{% endfor %}
+{% for i,(d,s,g,note) in rows %}<tr><td style="color:var(--dim);font-weight:800">{{i}}</td><td><a href="/report/{{d}}">{{d}}</a></td><td><b>{{s}}/100</b></td><td><span class="pill p{{g}}">{{g}}</span></td><td style="color:var(--mut)">{{note}}</td></tr>{% endfor %}
 </table></div>
 <div class="card cta"><h3>Is your store on the wrong half of this table?</h3>
 <p>Run the free scan — or request the full audit with live AI-surface testing inside ChatGPT, Perplexity &amp; Copilot.</p>
@@ -428,19 +442,19 @@ REPORT_PAGE = """<!doctype html><html><head><title>{{r.domain}} — Agent-Readin
 <h1>Is <em>{{r.domain}}</em><br>ready for AI shoppers?</h1></div>
 <div class="wrap">
 <div class="repcard">
-<span class="score g{{r.grade}}">{{r.score}}/100</span>
-<span class="grade">&nbsp;grade {{r.grade}}</span>
+<span class="score c{{r.grade}}">{{r.score}}<span class="outof">/100</span></span>
+&nbsp;<span class="pill p{{r.grade}}" style="font-size:1.05em;padding:6px 18px">GRADE {{r.grade}}</span>
 <div class="rank">Ranked #{{r.rank}} of {{r.total}} leading DTC brands on the Agent-Ready Index</div>
 </div>
-<div class="card"><b>What the scan found:</b><br><span style="color:#8b93a7">{{r.note}}</span></div>
-<div class="card"><b>Why this matters:</b><br><span style="color:#8b93a7">
+<div class="card"><b>What the scan found:</b><br><span style="color:var(--mut)">{{r.note}}</span></div>
+<div class="card"><b>Why this matters:</b><br><span style="color:var(--mut)">
 AI assistants are the fastest-growing shopping surface — AI-referred retail traffic is up 1,324% since Oct '24 and converts ~42% better. When your store scores low here, those assistants can't reliably read your prices, stock, or catalog — so they guess, misquote, or recommend a competitor instead. This is the channel most brands aren't measuring yet.</span></div>
 
 {% if r.peers %}
 <h3 style="margin:34px 0 6px">The {{r.category}} shelf — who AI can read</h3>
 <div class="card" style="padding:6px 22px">
 <table><tr><th>Brand</th><th>Score</th><th>Grade</th></tr>
-{% for d,s,g in r.peers %}<tr class="{{'yourrow' if d==r.domain else ''}}"><td>{% if d==r.domain %}▶ {% endif %}{{d}}</td><td>{{s}}/100</td><td class="g{{g}}">{{g}}</td></tr>{% endfor %}
+{% for d,s,g in r.peers %}<tr class="{{'yourrow' if d==r.domain else ''}}"><td>{% if d==r.domain %}▶ {% endif %}{{d}}</td><td><b>{{s}}/100</b></td><td><span class="pill p{{g}}">{{g}}</span></td></tr>{% endfor %}
 </table></div>
 {% endif %}
 
