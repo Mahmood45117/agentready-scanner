@@ -12,6 +12,37 @@ AUDIT_EMAIL = "mahmood@canaishopyou.com"   # <- where "request full audit" click
 UA = "AgentReadyScanner/2.0 (+https://canaishopyou.com)"
 TIMEOUT = 12
 
+import os, json as _json, datetime
+DATA_FILE = os.environ.get("DATA_FILE", "/tmp/cani_data.json")
+BASELINE_SCANS = 41  # brands + tests already run by founder pre-launch
+def _load():
+    try:
+        return _json.load(open(DATA_FILE))
+    except Exception:
+        return {"scans": [], "leads": []}
+def _save(d):
+    try:
+        _json.dump(d, open(DATA_FILE, "w"))
+    except Exception:
+        pass
+def log_scan(domain, score, grade):
+    d = _load()
+    d["scans"].append({"domain": domain, "score": score, "grade": grade,
+                       "ts": _utcnow()})
+    _save(d)
+def log_lead(domain, score, email=""):
+    d = _load()
+    d["leads"].append({"domain": domain, "score": score, "email": email, "ts": _utcnow()})
+    _save(d)
+def scan_count():
+    return BASELINE_SCANS + len(_load().get("scans", []))
+def recent_scans(n=5):
+    return list(reversed(_load().get("scans", [])))[:n]
+def _utcnow():
+    # avoid Date.now-style; use time
+    import time
+    return int(time.time())
+
 AI_BOTS = {
     "OAI-SearchBot":  ("ChatGPT search & shopping visibility", "FATAL — store is invisible in ChatGPT answers"),
     "ChatGPT-User":   ("live page fetches during ChatGPT sessions", "SEVERE — AI can't verify price/stock mid-conversation"),
@@ -249,7 +280,7 @@ PAGE = """<!doctype html><html><head><title>Can AI Shop You? — Agent-Readiness
 <div class="statrow">
 <div class="stat"><b>+1,324%</b><span>AI-referred retail traffic since Oct '24</span></div>
 <div class="stat"><b>42%</b><span>better conversion vs average</span></div>
-<div class="stat"><b>2/3</b><span>of 21 top DTC brands scored below A</span></div>
+<div class="stat"><b>{{scans}}</b><span>stores scanned for AI-readiness</span></div>
 </div>
 <form class="scan" method="post"><input name="domain" placeholder="yourstore.com" value="{{domain or ''}}" required>
 <button>Scan free</button></form></div>
@@ -273,7 +304,11 @@ PAGE = """<!doctype html><html><head><title>Can AI Shop You? — Agent-Readiness
 {% for name,status,pts,detail in r.checks %}<div class="card"><b class="{{status}}">{{status}}</b> &nbsp; <b>{{name}}</b> <span class="grade" style="font-size:.85em">({{pts}} pts)</span><br><span style="color:#8b93a7">{{detail}}</span></div>{% endfor %}
 <div class="card cta"><h3>This was the free scan — the machine layer.</h3>
 <p>The <b>full audit ($500)</b> tests your store live inside ChatGPT, Perplexity &amp; Copilot: what they actually say about you,<br>whether they quote your prices right (or hallucinate them) — with a fix roadmap ranked by revenue impact. Delivered in 5 days.</p>
-<a class="btn" href="mailto:""" + AUDIT_EMAIL + """?subject=Full%20audit%20request%20—%20{{r.domain}}%20({{r.score}}/100)&body=Scanned%20{{r.domain}}%20on%20canaishopyou.com%20—%20score%20{{r.score}}/100.%20I%20want%20the%20full%207-point%20audit.">Request the full audit →</a></div>
+<form method="post" action="/request" style="display:flex;gap:10px;max-width:460px;margin:0 auto;flex-wrap:wrap;justify-content:center">
+<input type="hidden" name="domain" value="{{r.domain}}"><input type="hidden" name="score" value="{{r.score}}">
+<input name="email" type="email" placeholder="you@yourstore.com" required style="flex:1;min-width:220px;padding:14px 16px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:#fff">
+<button>Request full audit →</button></form>
+<p style="margin-top:12px;font-size:.85em;color:var(--dim)">or email <a href="mailto:mahmood@canaishopyou.com">mahmood@canaishopyou.com</a></p></div>
 {% endif %}
 <div class="foot">CanAIShopYou · independent agent-readiness audits &amp; the Agent-Ready Index<br>
 <a href="mailto:mahmood@canaishopyou.com">mahmood@canaishopyou.com</a> · <a href="/index-report">Index Edition #1</a></div>
@@ -307,13 +342,33 @@ def index():
     if request.method == "POST":
         domain = request.form.get("domain", "")
         r = scan(domain)
+        try: log_scan(r.get("domain",""), r.get("score",0), r.get("grade",""))
+        except Exception: pass
         class O(dict): __getattr__ = dict.get
         r = O(r)
-    return render_template_string(PAGE, r=r, domain=domain)
+    return render_template_string(PAGE, r=r, domain=domain, scans=scan_count(), recent=recent_scans())
 
 @app.route("/index-report")
 def index_report():
-    return render_template_string(INDEX_PAGE, rows=list(enumerate(INDEX_ED1, 1)))
+    return render_template_string(INDEX_PAGE, rows=list(enumerate(INDEX_ED1, 1)), scans=scan_count())
+
+
+@app.route("/request", methods=["POST"])
+def request_audit():
+    domain = request.form.get("domain", "")
+    email = request.form.get("email", "")
+    score = request.form.get("score", "")
+    try: log_lead(domain, score, email)
+    except Exception: pass
+    return render_template_string(BASE_DOC, body=(
+        "<div class='wrap'><div class='card cta' style='margin-top:60px'>"
+        "<h3>Request received ✓</h3><p>Your full audit of <b>" + (domain or "your store") +
+        "</b> is queued. We\'ll email the 7-point report within 5 business days"
+        + ((" to <b>"+email+"</b>") if email else "") + ".</p>"
+        "<a class='btn' href='/'>← Back</a></div></div>"))
+
+BASE_DOC = """<!doctype html><html><head><title>CanAIShopYou</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"><style>""" + BASE_CSS + """</style></head><body>{{ body|safe }}</body></html>"""
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
