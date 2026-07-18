@@ -454,7 +454,7 @@ REPORT_PAGE = """<!doctype html><html><head><title>{{r.domain}} — Agent-Readin
 </div>
 <div class="card"><b>What the scan found:</b><br><span style="color:var(--mut)">{{r.note}}</span></div>
 <div class="card"><b>Why this matters:</b><br><span style="color:var(--mut)">
-AI assistants are the fastest-growing shopping surface — AI-referred retail traffic is up 1,324% since Oct '24 and converts ~42% better. When your store scores low here, those assistants can't reliably read your prices, stock, or catalog — so they guess, misquote, or recommend a competitor instead. This is the channel most brands aren't measuring yet.</span></div>
+AI assistants are the fastest-growing shopping surface — AI-referred retail traffic has grown more than 1,200% since late 2024 (Adobe Analytics), and those shoppers tend to convert better than search or social. When your store scores low here, those assistants can't reliably read your prices, stock, or catalog — so they guess, misquote, or recommend a competitor instead. This is the channel most brands aren't measuring yet.</span></div>
 
 {% if r.peers %}
 <h3 style="margin:34px 0 6px">The {{r.category}} shelf — who AI can read</h3>
@@ -466,7 +466,7 @@ AI assistants are the fastest-growing shopping surface — AI-referred retail tr
 
 <div class="card cta" style="margin-top:30px">
 <h3>Get the full 7-point audit of {{r.domain}}</h3>
-<p>This is the free scan. The paid audit adds live testing inside ChatGPT, Perplexity &amp; Copilot — the exact prices &amp; recommendations they give shoppers for your products — plus a fix roadmap ranked by revenue impact.</p>
+<p>This is the free scan. The paid audit adds <b>live testing</b> — an autonomous AI agent actually shopping your store (can it find your products, read your prices, and reach checkout?), the real recommendations and prices AI assistants give for your products, and a fix roadmap ranked by revenue impact.</p>
 <form class="scan" method="post" action="/request" style="max-width:520px">
 <input type="hidden" name="domain" value="{{r.domain}}"><input type="hidden" name="score" value="{{r.score}}">
 <input name="email" type="email" placeholder="you@{{r.domain}}" required>
