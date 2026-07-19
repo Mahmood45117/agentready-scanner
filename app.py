@@ -164,6 +164,15 @@ CATEGORIES = {
     "Electronics & gear": ["nomadgoods.com", "peakdesign.com"],
     "Pet": ["spotandtango.com", "thefarmersdog.com"],
 }
+# Prefer the generated Index (scale_prospects.py → index_generated.py) when present;
+# the inline list above is the fallback. This makes growing the Index a one-file upload.
+try:
+    import os as _os, sys as _sys
+    _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+    from index_generated import INDEX_ED1, CATEGORIES  # noqa: F811
+except Exception:
+    pass
+
 _INDEX = {d: (s, g, note) for d, s, g, note in INDEX_ED1}
 _RANK = {d: i for i, (d, *_) in enumerate(INDEX_ED1, 1)}
 
