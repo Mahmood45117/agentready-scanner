@@ -192,7 +192,7 @@ def brand_report(domain):
                    key=lambda x: -x[1]) if cat else []
     return {"domain": domain, "score": score, "grade": grade, "note": note,
             "rank": _RANK.get(domain), "total": len(INDEX_ED1),
-            "category": cat, "peers": peers}
+            "category": cat, "peers": peers, "tested_date": "July 2026"}
 
 def fetch(url):
     try:
@@ -404,7 +404,7 @@ NAV = """<div class="wrap"><div class="nav"><a class="brand" href="/">🔍 Can<s
 PAGE = """<!doctype html><html><head><title>Can AI Shop You? — Agent-Readiness Scanner & Index</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta property="og:title" content="Can AI Shop You?">
-<meta property="og:description" content="AI assistants recommend stores to millions of shoppers. Two-thirds of top DTC brands are broken for them. Scan yours free in 30 seconds.">
+<meta property="og:description" content="Independent AI-commerce testing: can an AI shopping agent find, read and buy from your store? Run the free scan on your own store.">
 <meta name="description" content="Independent AI-commerce testing: can an AI shopping agent actually find, read & buy from your store? Free scan + the Agent-Ready Index.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔍</text></svg>">
 <style>""" + BASE_CSS + """</style></head><body>
@@ -412,9 +412,9 @@ PAGE = """<!doctype html><html><head><title>Can AI Shop You? — Agent-Readiness
 <div class="hero"><h1>AI shoppers are buying from stores right now.<br><em>Can they buy from yours?</em></h1>
 <p>We send an autonomous AI shopping agent to actually find, read &amp; buy from your store — and show you, with recorded evidence, exactly where the journey breaks. Independent AI-commerce testing.</p>
 <div class="statrow">
-<div class="stat"><b>+1,324%</b><span>AI-referred retail traffic since Oct '24</span></div>
-<div class="stat"><b>42%</b><span>better conversion vs average</span></div>
-<div class="stat"><b>{{scans}}</b><span>stores scanned for AI-readiness</span></div>
+<div class="stat"><b>+1,200%</b><span>AI-referred retail traffic since '24 (Adobe)</span></div>
+<div class="stat"><b>Reproduced</b><span>every finding, multiple runs</span></div>
+<div class="stat"><b>Private</b><span>findings shared only with you</span></div>
 </div>
 <form class="scan" method="post"><input name="domain" placeholder="yourstore.com" value="{{domain or ''}}" required>
 <button>Scan free</button></form></div>
@@ -429,9 +429,9 @@ PAGE = """<!doctype html><html><head><title>Can AI Shop You? — Agent-Readiness
 <div class="tier"><b>$500</b><div class="per">full audit · 5 days</div><ul><li>AI shopper buy-test (recorded)</li><li>Reproduced evidence per failure</li><li>Fix roadmap + retest</li></ul></div>
 <div class="tier"><b>$1,000<span class="per">/mo</span></b><div class="per">fix &amp; monitor</div><ul><li>Fix implementation</li><li>Weekly re-scans + alerts</li><li>Monthly report</li></ul></div>
 </div>
-<div class="card cta"><h3>The Agent-Ready Index</h3>
-<p>We publish quarterly agent-readiness scores for leading DTC brands.<br>Edition #1: <b>30 brands scanned — two-thirds scored below A.</b> One blocked itself out of ChatGPT entirely.</p>
-<a class="btn" href="/index-report">Read the Index →</a></div>
+<div class="card cta"><h3>Independent · reproduced · private</h3>
+<p>We test how AI shopping systems handle your store, reproduce every finding across multiple runs, and share the detailed results privately with you — with the methodology. We don't publish scores or rankings.</p>
+<a class="btn" href="/index-report">How it works →</a></div>
 {% endif %}
 {% if r %}
 <div class="card" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap"><span class="score c{{r.grade}}">{{r.score}}<span class="outof">/100</span></span> <span class="pill p{{r.grade}}" style="font-size:1em;padding:6px 16px">GRADE {{r.grade}}</span> <span class="dom">{{r.domain}}</span></div>
@@ -448,23 +448,22 @@ PAGE = """<!doctype html><html><head><title>Can AI Shop You? — Agent-Readiness
 <a href="mailto:mahmood@canaishopyou.com">mahmood@canaishopyou.com</a> · <a href="/index-report">Index Edition #1</a></div>
 </div></body></html>"""
 
-INDEX_PAGE = """<!doctype html><html><head><title>The Agent-Ready Index — Edition #1</title>
+INDEX_PAGE = """<!doctype html><html><head><title>Independent AI-Commerce Testing | CanAIShopYou</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta property="og:title" content="The Agent-Ready Index — Edition #1">
-<meta property="og:description" content="21 leading DTC brands scored for AI-shopping readiness. Two-thirds below A. One brand blocked itself out of ChatGPT entirely.">
+<meta name="robots" content="noindex">
+<meta property="og:title" content="Independent AI-Commerce Testing">
+<meta property="og:description" content="We run controlled tests of whether AI shopping systems can find, read and buy from DTC stores. Findings are shared privately with each merchant.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔍</text></svg>">
 <style>""" + BASE_CSS + """</style></head><body>
 """ + NAV + """
-<div class="hero"><h1>The <em>Agent-Ready</em> Index</h1>
-<p><b>Edition #1 — July 2026.</b> Thirty leading DTC brands, scanned for AI-shopping readiness.<br>
-Headline finding: <b style="color:var(--accent)">two-thirds score below A</b> — broken product data, blocked crawlers, invisible listings.</p></div>
-<div class="card"><table><tr><th>#</th><th>BRAND</th><th>SCORE</th><th>GRADE</th><th>KEY FINDING</th></tr>
-{% for i,(d,s,g,note) in rows %}<tr><td style="color:var(--dim);font-weight:800">{{i}}</td><td><a href="/report/{{d}}">{{d}}</a></td><td><b>{{s}}/100</b></td><td><span class="pill p{{g}}">{{g}}</span></td><td style="color:var(--mut)">{{note}}</td></tr>{% endfor %}
-</table></div>
-<div class="card cta"><h3>Is your store on the wrong half of this table?</h3>
-<p>Run the free scan — or request the full audit, where we send an AI shopping agent to actually buy from your store and record where it fails.</p>
+<div class="hero"><h1>Independent <em>AI-commerce</em> testing</h1>
+<p>We run controlled tests of whether AI shopping systems can discover, understand and buy from DTC stores.<br>
+<b>Findings are shared privately with each merchant</b> — we don't publish scores, grades or rankings.</p></div>
+<div class="card"><b>How it works</b><br><span style="color:var(--mut)">For each store we run realistic shopping scenarios and record where the journey succeeds or breaks — discovery, product information, selection and checkout. Every finding is reproduced and versioned, with documented limitations. Detailed observations go directly to the brand, with methodology available on request. We do not publish specific negative findings about any store.</span></div>
+<div class="card cta"><h3>Want to know how AI shoppers do on your store?</h3>
+<p>Run the free scan on your own store — or request a full independent test.</p>
 <a class="btn" href="/">Scan your store free →</a></div>
-<div class="foot">Methodology: automated deterministic checks (crawler access · CDN posture · llms.txt · catalog rails · structured data).<br>Live AI-surface findings (hallucination catches) noted where verified. Edition #2: Q4 2026.<br>
+<div class="foot">Independent AI-commerce testing · methodology available on request.<br>
 <a href="mailto:mahmood@canaishopyou.com">mahmood@canaishopyou.com</a></div>
 </div></body></html>"""
 
@@ -515,42 +514,32 @@ def request_audit():
         + ((" to <b>"+email+"</b>") if email else "") + ".</p>"
         "<a class='btn' href='/'>← Back</a></div></div>"))
 
-REPORT_PAGE = """<!doctype html><html><head><title>{{r.domain}} — Agent-Readiness Report | CanAIShopYou</title>
+REPORT_PAGE = """<!doctype html><html><head><title>{{r.domain}} — Independent AI-Commerce Test | CanAIShopYou</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="description" content="{{r.domain}} scores {{r.score}}/100 (grade {{r.grade}}) on agent-readiness — how well AI shopping assistants can find, read &amp; buy from the store.">
-<meta property="og:title" content="{{r.domain}}: {{r.score}}/100 on the Agent-Ready Index">
-<meta property="og:description" content="How ready is {{r.domain}} for AI shopping assistants (ChatGPT, Perplexity, Copilot)? {{r.note}}">
-<meta property="og:type" content="website"><meta name="twitter:card" content="summary">
+<meta name="robots" content="noindex">
+<meta name="description" content="{{r.domain}} was independently tested by CanAIShopYou for AI-commerce performance. Detailed findings are shared privately with the merchant.">
+<meta property="og:title" content="{{r.domain}} — independently tested for AI commerce">
+<meta property="og:description" content="CanAIShopYou independently tests whether AI shopping systems can find, read and buy from a store. Findings are shared privately with the merchant.">
 <style>""" + BASE_CSS + """</style></head><body>""" + NAV + """
 <div class="hero" style="padding-bottom:8px">
-<h1>Is <em>{{r.domain}}</em><br>ready for AI shoppers?</h1></div>
+<h1><em>{{r.domain}}</em><br>independently tested</h1></div>
 <div class="wrap">
 <div class="repcard">
-<span class="score c{{r.grade}}">{{r.score}}<span class="outof">/100</span></span>
-&nbsp;<span class="pill p{{r.grade}}" style="font-size:1.05em;padding:6px 18px">GRADE {{r.grade}}</span>
-<div class="rank">Ranked #{{r.rank}} of {{r.total}} leading DTC brands on the Agent-Ready Index</div>
+<div style="font-size:1.02em;color:var(--mut);font-weight:600">Last independently tested</div>
+<div style="font-size:1.9em;font-weight:800;margin:6px 0;letter-spacing:-.5px">{{r.tested_date}}</div>
+<div class="rank" style="margin-top:8px">Testing completed. Detailed findings are shared <b>privately with the merchant</b>.</div>
 </div>
-<div class="card"><b>What the scan found:</b><br><span style="color:var(--mut)">{{r.note}}</span></div>
-<div class="card"><b>Why this matters:</b><br><span style="color:var(--mut)">
-AI assistants are the fastest-growing shopping surface — AI-referred retail traffic has grown more than 1,200% since late 2024 (Adobe Analytics), and those shoppers tend to convert better than search or social. When your store scores low here, those assistants can't reliably read your prices, stock, or catalog — so they guess, misquote, or recommend a competitor instead. This is the channel most brands aren't measuring yet.</span></div>
-
-{% if r.peers %}
-<h3 style="margin:34px 0 6px">The {{r.category}} shelf — who AI can read</h3>
-<div class="card" style="padding:6px 22px">
-<table><tr><th>Brand</th><th>Score</th><th>Grade</th></tr>
-{% for d,s,g in r.peers %}<tr class="{{'yourrow' if d==r.domain else ''}}"><td>{% if d==r.domain %}▶ {% endif %}{{d}}</td><td><b>{{s}}/100</b></td><td><span class="pill p{{g}}">{{g}}</span></td></tr>{% endfor %}
-</table></div>
-{% endif %}
+<div class="card"><b>What this is</b><br><span style="color:var(--mut)">CanAIShopYou runs independent, controlled tests of whether AI shopping systems can discover, understand and complete a purchase journey for a store. We do not publish specific findings — they go directly and privately to the brand. Methodology available on request.</span></div>
 
 <div class="card cta" style="margin-top:30px">
-<h3>Get the full 7-point audit of {{r.domain}}</h3>
-<p>This is the free scan. The paid audit adds <b>live testing</b> — an autonomous AI agent actually shopping your store (can it find your products, read your prices, and reach checkout?), the real recommendations and prices AI assistants give for your products, and a fix roadmap ranked by revenue impact.</p>
+<h3>On the {{r.domain}} team? Request your findings.</h3>
+<p>We'll send the reproduced observations, the recorded evidence, and the methodology — free, no strings.</p>
 <form class="scan" method="post" action="/request" style="max-width:520px">
-<input type="hidden" name="domain" value="{{r.domain}}"><input type="hidden" name="score" value="{{r.score}}">
+<input type="hidden" name="domain" value="{{r.domain}}">
 <input name="email" type="email" placeholder="you@{{r.domain}}" required>
-<button type="submit">Send my full audit →</button></form>
+<button type="submit">Send me the findings →</button></form>
 </div>
-<div class="foot">Free automated checks · <a href="/index-report">see the full Index</a> · <a href="/">scan another store</a><br>
+<div class="foot">Independent AI-commerce testing · <a href="/">what we do</a> · <a href="/">scan your own store</a><br>
 <a href="mailto:mahmood@canaishopyou.com">mahmood@canaishopyou.com</a></div>
 </div></body></html>"""
 
