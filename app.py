@@ -405,12 +405,12 @@ PAGE = """<!doctype html><html><head><title>Can AI Shop You? — Agent-Readiness
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta property="og:title" content="Can AI Shop You?">
 <meta property="og:description" content="AI assistants recommend stores to millions of shoppers. Two-thirds of top DTC brands are broken for them. Scan yours free in 30 seconds.">
-<meta name="description" content="Free agent-readiness scan: can ChatGPT, Perplexity & Copilot see and sell your store? Publisher of the Agent-Ready Index.">
+<meta name="description" content="Independent AI-commerce testing: can an AI shopping agent actually find, read & buy from your store? Free scan + the Agent-Ready Index.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔍</text></svg>">
 <style>""" + BASE_CSS + """</style></head><body>
 """ + NAV + """
-<div class="hero"><h1>AI assistants are already sending shoppers to stores.<br><em>Is yours one of them?</em></h1>
-<p>ChatGPT, Perplexity &amp; Copilot now recommend and price-check products for millions. We test exactly how they see your store — and what they get wrong.</p>
+<div class="hero"><h1>AI shoppers are buying from stores right now.<br><em>Can they buy from yours?</em></h1>
+<p>We send an autonomous AI shopping agent to actually find, read &amp; buy from your store — and show you, with recorded evidence, exactly where the journey breaks. Independent AI-commerce testing.</p>
 <div class="statrow">
 <div class="stat"><b>+1,324%</b><span>AI-referred retail traffic since Oct '24</span></div>
 <div class="stat"><b>42%</b><span>better conversion vs average</span></div>
@@ -421,12 +421,12 @@ PAGE = """<!doctype html><html><head><title>Can AI Shop You? — Agent-Readiness
 {% if not r %}
 <div class="steps">
 <div class="step"><span class="n">STEP 1</span><h4>🔍 Scan the plumbing</h4><p>Crawler access, bot-walls, product data, catalog rails — the machine layer AI depends on. Free, 30 seconds.</p></div>
-<div class="step"><span class="n">STEP 2</span><h4>🤖 Interrogate the AIs</h4><p>The full audit tests your store live inside ChatGPT, Perplexity &amp; Copilot — what they say, what they hallucinate.</p></div>
+<div class="step"><span class="n">STEP 2</span><h4>🤖 Run the AI shopper</h4><p>The full audit sends an AI shopping agent to buy from your store and records every failure — blocked at the door, wrong variant, checkout breaks — reproduced across multiple runs.</p></div>
 <div class="step"><span class="n">STEP 3</span><h4>📈 Fix what costs you</h4><p>Findings ranked by revenue impact, a 30-day roadmap, and a re-scan to prove the fix worked.</p></div>
 </div>
 <div class="price">
 <div class="tier"><b>Free</b><div class="per">instant scan</div><ul><li>5 automated checks</li><li>Scored report card</li><li>No signup</li></ul></div>
-<div class="tier"><b>$500</b><div class="per">full audit · 5 days</div><ul><li>Live AI-surface testing</li><li>Hallucination hunt</li><li>Revenue-ranked fix roadmap</li></ul></div>
+<div class="tier"><b>$500</b><div class="per">full audit · 5 days</div><ul><li>AI shopper buy-test (recorded)</li><li>Reproduced evidence per failure</li><li>Fix roadmap + retest</li></ul></div>
 <div class="tier"><b>$1,000<span class="per">/mo</span></b><div class="per">fix &amp; monitor</div><ul><li>Fix implementation</li><li>Weekly re-scans + alerts</li><li>Monthly report</li></ul></div>
 </div>
 <div class="card cta"><h3>The Agent-Ready Index</h3>
@@ -437,14 +437,14 @@ PAGE = """<!doctype html><html><head><title>Can AI Shop You? — Agent-Readiness
 <div class="card" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap"><span class="score c{{r.grade}}">{{r.score}}<span class="outof">/100</span></span> <span class="pill p{{r.grade}}" style="font-size:1em;padding:6px 16px">GRADE {{r.grade}}</span> <span class="dom">{{r.domain}}</span></div>
 {% for name,status,pts,detail in r.checks %}<div class="card"><span class="{{status}}">{{status}}</span> &nbsp; <b>{{name}}</b> <span class="grade" style="font-size:.85em">({{pts}} pts)</span><br><span style="color:var(--mut)">{{detail}}</span></div>{% endfor %}
 <div class="card cta"><h3>This was the free scan — the machine layer.</h3>
-<p>The <b>full audit ($500)</b> tests your store live inside ChatGPT, Perplexity &amp; Copilot: what they actually say about you,<br>whether they quote your prices right (or hallucinate them) — with a fix roadmap ranked by revenue impact. Delivered in 5 days.</p>
+<p>The <b>full audit ($500)</b> sends an AI shopping agent to actually buy from your store, records every failure with reproduced evidence, and hands you the exact fixes —<br>then we retest to prove it's resolved. Delivered in 5 days.</p>
 <form method="post" action="/request" style="display:flex;gap:10px;max-width:460px;margin:0 auto;flex-wrap:wrap;justify-content:center">
 <input type="hidden" name="domain" value="{{r.domain}}"><input type="hidden" name="score" value="{{r.score}}">
 <input name="email" type="email" placeholder="you@yourstore.com" required style="flex:1;min-width:220px">
 <button>Request full audit →</button></form>
 <p style="margin-top:12px;font-size:.85em;color:var(--dim)">or email <a href="mailto:mahmood@canaishopyou.com">mahmood@canaishopyou.com</a></p></div>
 {% endif %}
-<div class="foot">CanAIShopYou · independent agent-readiness audits &amp; the Agent-Ready Index<br>
+<div class="foot">CanAIShopYou · independent AI-commerce testing &amp; the Agent-Ready Index<br>
 <a href="mailto:mahmood@canaishopyou.com">mahmood@canaishopyou.com</a> · <a href="/index-report">Index Edition #1</a></div>
 </div></body></html>"""
 
@@ -462,7 +462,7 @@ Headline finding: <b style="color:var(--accent)">two-thirds score below A</b> �
 {% for i,(d,s,g,note) in rows %}<tr><td style="color:var(--dim);font-weight:800">{{i}}</td><td><a href="/report/{{d}}">{{d}}</a></td><td><b>{{s}}/100</b></td><td><span class="pill p{{g}}">{{g}}</span></td><td style="color:var(--mut)">{{note}}</td></tr>{% endfor %}
 </table></div>
 <div class="card cta"><h3>Is your store on the wrong half of this table?</h3>
-<p>Run the free scan — or request the full audit with live AI-surface testing inside ChatGPT, Perplexity &amp; Copilot.</p>
+<p>Run the free scan — or request the full audit, where we send an AI shopping agent to actually buy from your store and record where it fails.</p>
 <a class="btn" href="/">Scan your store free →</a></div>
 <div class="foot">Methodology: automated deterministic checks (crawler access · CDN posture · llms.txt · catalog rails · structured data).<br>Live AI-surface findings (hallucination catches) noted where verified. Edition #2: Q4 2026.<br>
 <a href="mailto:mahmood@canaishopyou.com">mahmood@canaishopyou.com</a></div>
