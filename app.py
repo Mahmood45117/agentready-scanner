@@ -401,43 +401,48 @@ td a:hover{color:var(--accent);border-bottom-color:var(--accent)}
 NAV = """<div class="wrap"><div class="nav"><a class="brand" href="/">🔍 Can<span>AI</span>ShopYou</a>
 <span class="links"><a href="/">Scanner</a><a href="/index-report">The Index</a><a href="/about">About</a><a href="mailto:mahmood@canaishopyou.com">Contact</a></span></div>"""
 
-PAGE = """<!doctype html><html><head><title>Can AI Shop You? — Agent-Readiness Scanner & Index</title>
+PAGE = """<!doctype html><html><head><title>CanAIShopYou — Does AI recommend your store, or a competitor?</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta property="og:title" content="Can AI Shop You?">
-<meta property="og:description" content="Independent AI-commerce testing: can an AI shopping agent find, read and buy from your store? Run the free scan on your own store.">
-<meta name="description" content="Independent AI-commerce testing: can an AI shopping agent actually find, read & buy from your store? Free scan + the Agent-Ready Index.">
+<meta property="og:title" content="Does AI recommend your store — or a competitor?">
+<meta property="og:description" content="When shoppers ask an AI what to buy, does it name your brand or a rival? We run the real questions your customers ask and show you, with reproduced evidence.">
+<meta name="description" content="Shoppers now ask AI what to buy. CanAIShopYou tests whether AI assistants recommend your store, rank a competitor above you, or get your facts wrong — reproduced and documented.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔍</text></svg>">
 <style>""" + BASE_CSS + """</style></head><body>
 """ + NAV + """
-<div class="hero"><h1>AI shoppers are buying from stores right now.<br><em>Can they buy from yours?</em></h1>
-<p>We send an autonomous AI shopping agent to actually find, read &amp; buy from your store — and show you, with recorded evidence, exactly where the journey breaks. Independent AI-commerce testing.</p>
+<div class="hero"><h1>Shoppers ask AI what to buy.<br><em>Does it recommend you — or your competitor?</em></h1>
+<p>Millions now ask ChatGPT, Claude and Perplexity what to buy before they ever reach your site. We run the exact questions your customers ask and show you — with reproduced evidence — whether AI names your brand, ranks a rival above you, or gets your price wrong.</p>
 <div class="statrow">
 <div class="stat"><b>+1,200%</b><span>AI-referred retail traffic since '24 (Adobe)</span></div>
-<div class="stat"><b>Reproduced</b><span>every finding, multiple runs</span></div>
+<div class="stat"><b>Reproduced 3&times;</b><span>every finding, multiple runs</span></div>
 <div class="stat"><b>Private</b><span>findings shared only with you</span></div>
 </div>
 <form class="scan" method="post"><input name="domain" placeholder="yourstore.com" value="{{domain or ''}}" required>
-<button>Scan free</button></form></div>
+<button>Free scan</button></form></div>
 {% if not r %}
+<div class="card" style="border-left:3px solid var(--accent)">
+<div style="font-size:.72em;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--accent)">A real finding &mdash; brand name withheld</div>
+<p style="margin:10px 0 6px;font-size:1.08em;line-height:1.55;color:var(--ink)">In a controlled <b>Claude</b> test we asked the exact question a shopper types &mdash; <i>&ldquo;best fresh dog food brands&rdquo;</i>. one of the category's best-known DTC challenger brands was <b>out-ranked by its top competitor in 3 of 3 runs</b>, and dropped from the list entirely when we asked as a first-time buyer.</p>
+<p style="margin:0;color:var(--mut);font-size:.95em">The brand had no idea. We reproduce every finding, document the exact prompts, and send them privately &mdash; we never publish findings about a named store. <b>This is what we test on yours.</b></p>
+</div>
 <div class="steps">
-<div class="step"><span class="n">STEP 1</span><h4>🔍 Scan the plumbing</h4><p>Crawler access, bot-walls, product data, catalog rails — the machine layer AI depends on. Free, 30 seconds.</p></div>
-<div class="step"><span class="n">STEP 2</span><h4>🤖 Run the AI shopper</h4><p>The full audit sends an AI shopping agent to buy from your store and records every failure — blocked at the door, wrong variant, checkout breaks — reproduced across multiple runs.</p></div>
-<div class="step"><span class="n">STEP 3</span><h4>📈 Fix what costs you</h4><p>Findings ranked by revenue impact, a 30-day roadmap, and a re-scan to prove the fix worked.</p></div>
+<div class="step"><span class="n">STEP 1</span><h4>🔍 Free readability scan</h4><p>Can AI even read your store? Structured data, crawler access, the machine layer AI depends on. Free, 30 seconds &mdash; no signup.</p></div>
+<div class="step"><span class="n">STEP 2</span><h4>🤖 The AI visibility audit</h4><p>We ask the real questions your customers ask an AI and record what it says: does it recommend you, rank a competitor above you, or misstate your price? Every finding reproduced across multiple runs.</p></div>
+<div class="step"><span class="n">STEP 3</span><h4>📈 Know exactly where you stand</h4><p>A clear teardown of where you're recommended, where you're invisible, and which competitor is winning the answer &mdash; with the exact prompts so your team can reproduce and act on it.</p></div>
 </div>
 <div class="price">
-<div class="tier"><b>Free</b><div class="per">instant scan</div><ul><li>5 automated checks</li><li>Scored report card</li><li>No signup</li></ul></div>
-<div class="tier"><b>$500</b><div class="per">full audit · 5 days</div><ul><li>AI shopper buy-test (recorded)</li><li>Reproduced evidence per failure</li><li>Fix roadmap + retest</li></ul></div>
-<div class="tier"><b>$1,000<span class="per">/mo</span></b><div class="per">fix &amp; monitor</div><ul><li>Fix implementation</li><li>Weekly re-scans + alerts</li><li>Monthly report</li></ul></div>
+<div class="tier"><b>Free</b><div class="per">instant readability scan</div><ul><li>5 automated checks</li><li>Scored report card</li><li>No signup</li></ul></div>
+<div class="tier"><b>$500</b><div class="per">AI Visibility Diagnostic · 5 days</div><ul><li>5 reproduced findings</li><li>The competitors AI names instead of you</li><li>Any price/fact errors + the exact prompts</li></ul></div>
+<div class="tier"><b>$300<span class="per">/mo</span></b><div class="per">AI Visibility Monitor</div><ul><li>We re-run your visibility each month</li><li>Alerts when AI shifts to a new competitor</li><li>You get the trend; your team acts</li></ul></div>
 </div>
-<div class="card cta"><h3>Independent · reproduced · private</h3>
-<p>We test how AI shopping systems handle your store, reproduce every finding across multiple runs, and share the detailed results privately with you — with the methodology. We don't publish scores or rankings.</p>
-<a class="btn" href="/index-report">How it works →</a></div>
+<div class="card cta"><h3>Independent &middot; reproduced &middot; private</h3>
+<p>We run the questions your customers ask an AI, reproduce every result across multiple runs, and show you exactly where you're recommended or invisible &mdash; privately, with the prompts to reproduce it. We never publish findings about a named brand.</p>
+<a class="btn" href="/index-report">How it works &rarr;</a></div>
 {% endif %}
 {% if r %}
 <div class="card" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap"><span class="score c{{r.grade}}">{{r.score}}<span class="outof">/100</span></span> <span class="pill p{{r.grade}}" style="font-size:1em;padding:6px 16px">GRADE {{r.grade}}</span> <span class="dom">{{r.domain}}</span></div>
 {% for name,status,pts,detail in r.checks %}<div class="card"><span class="{{status}}">{{status}}</span> &nbsp; <b>{{name}}</b> <span class="grade" style="font-size:.85em">({{pts}} pts)</span><br><span style="color:var(--mut)">{{detail}}</span></div>{% endfor %}
-<div class="card cta"><h3>This was the free scan — the machine layer.</h3>
-<p>The <b>full audit ($500)</b> sends an AI shopping agent to actually buy from your store, records every failure with reproduced evidence, and hands you the exact fixes —<br>then we retest to prove it's resolved. Delivered in 5 days.</p>
+<div class="card cta"><h3>That was the readability scan — now see what AI actually says about you.</h3>
+<p>The <b>$500 AI Visibility Diagnostic</b> runs the real questions your customers ask an AI and shows you where you're recommended, where a competitor is ranked above you, and any price or facts it gets wrong —<br>reproduced across multiple runs, with the exact prompts. Delivered in 5 days.</p>
 <form method="post" action="/request" style="display:flex;gap:10px;max-width:460px;margin:0 auto;flex-wrap:wrap;justify-content:center">
 <input type="hidden" name="domain" value="{{r.domain}}"><input type="hidden" name="score" value="{{r.score}}">
 <input name="email" type="email" placeholder="you@yourstore.com" required style="flex:1;min-width:220px">
