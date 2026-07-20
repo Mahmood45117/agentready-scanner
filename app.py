@@ -399,7 +399,7 @@ td a:hover{color:var(--accent);border-bottom-color:var(--accent)}
 """
 
 NAV = """<div class="wrap"><div class="nav"><a class="brand" href="/">🔍 Can<span>AI</span>ShopYou</a>
-<span class="links"><a href="/">Scanner</a><a href="/index-report">The Index</a><a href="mailto:mahmood@canaishopyou.com">Contact</a></span></div>"""
+<span class="links"><a href="/">Scanner</a><a href="/index-report">The Index</a><a href="/about">About</a><a href="mailto:mahmood@canaishopyou.com">Contact</a></span></div>"""
 
 PAGE = """<!doctype html><html><head><title>Can AI Shop You? — Agent-Readiness Scanner & Index</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -444,8 +444,8 @@ PAGE = """<!doctype html><html><head><title>Can AI Shop You? — Agent-Readiness
 <button>Request full audit →</button></form>
 <p style="margin-top:12px;font-size:.85em;color:var(--dim)">or email <a href="mailto:mahmood@canaishopyou.com">mahmood@canaishopyou.com</a></p></div>
 {% endif %}
-<div class="foot">CanAIShopYou · independent AI-commerce testing &amp; the Agent-Ready Index<br>
-<a href="mailto:mahmood@canaishopyou.com">mahmood@canaishopyou.com</a> · <a href="/index-report">Index Edition #1</a></div>
+<div class="foot">CanAIShopYou · independent AI-commerce testing &amp; the Agent-Ready Index · Multan, Pakistan<br>
+<a href="/about">About</a> · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · <a href="/index-report">The Index</a> · <a href="mailto:mahmood@canaishopyou.com">mahmood@canaishopyou.com</a></div>
 </div></body></html>"""
 
 INDEX_PAGE = """<!doctype html><html><head><title>Independent AI-Commerce Testing | CanAIShopYou</title>
@@ -467,6 +467,97 @@ INDEX_PAGE = """<!doctype html><html><head><title>Independent AI-Commerce Testin
 <a href="mailto:mahmood@canaishopyou.com">mahmood@canaishopyou.com</a></div>
 </div></body></html>"""
 
+FOOT = ('<div class="foot">CanAIShopYou · independent AI-commerce testing · Multan, Pakistan<br>'
+        '<a href="/about">About</a> · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · '
+        '<a href="mailto:mahmood@canaishopyou.com">mahmood@canaishopyou.com</a></div>')
+
+def static_page(title, desc, hero_h1, hero_sub, body):
+    """A plain, INDEXABLE trust page (About/Privacy/Terms) in the site's own design system.
+    These are deliberately not noindex'd — they're the legitimacy signals search engines and AI
+    assistants look for when someone checks whether the business is real."""
+    head = ("<!doctype html><html><head><title>" + title + " | CanAIShopYou</title>"
+            '<meta name="viewport" content="width=device-width,initial-scale=1">'
+            '<meta name="description" content="' + desc + '">'
+            '<meta property="og:title" content="' + title + ' | CanAIShopYou">'
+            '<meta property="og:description" content="' + desc + '">'
+            '<link rel="icon" href="data:image/svg+xml,<svg xmlns=\'http://www.w3.org/2000/svg\''
+            " viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔍</text></svg>\">"
+            "<style>" + BASE_CSS + "</style></head><body>")
+    hero = ('<div class="hero" style="padding-bottom:20px"><h1>' + hero_h1 + '</h1>'
+            + ('<p>' + hero_sub + '</p>' if hero_sub else '') + '</div>')
+    return head + NAV + hero + '<div class="wrap">' + body + FOOT + '</div></body></html>'
+
+ABOUT_BODY = """
+<div class="card"><b>What CanAIShopYou Is</b><br><span style="color:var(--mut)">
+CanAIShopYou is an independent commerce intelligence platform. We benchmark how AI assistants and autonomous
+shopping agents—the systems consumers use to research and buy—discover, evaluate, and recommend online brands.
+Our infrastructure monitors where the discovery pipeline breaks, reproduces findings across multiple controlled
+simulation runs, and provides documented, actionable intelligence privately to merchants.</span></div>
+
+<div class="card"><b>Our Foundation</b><br><span style="color:var(--mut)">
+CanAIShopYou operates as an independent commerce intelligence lab dedicated to building a transparent testing
+layer for AI search. Headquartered in Multan, Pakistan, we analyze AI retrieval models to support
+direct-to-consumer (DTC) brands across the US and EU. For methodologies or custom inquiries, reach our research
+team directly at <a href="mailto:mahmood@canaishopyou.com">mahmood@canaishopyou.com</a>.</span></div>
+
+<div class="card"><b>How We Work</b><br><span style="color:var(--mut)">
+We maintain absolute independence—we are not affiliated with, funded by, or endorsed by any brand we audit or
+any AI provider. Every finding is rigorously reproduced and documented under specific environmental constraints
+rather than broad generalizations. To protect brand integrity, we never publish negative findings publicly; all
+vulnerability reports are routed directly and securely to the respective merchant.</span></div>
+
+<div class="card"><b>Data &amp; Privacy Guardrails</b><br><span style="color:var(--mut)">
+We operate on zero-trust data principles. We never request passwords, financial details, or credential
+authorization. CanAIShopYou does not sell data, utilize advertising trackers, or store proprietary information.
+Our automated scanner only parses publicly accessible pages of the storefronts submitted for analysis.</span></div>
+
+<div class="card cta"><h3>Audit Your Brand's AI Visibility</h3>
+<p>Run a free 30-second scan to evaluate your storefront, or contact us to schedule a comprehensive, full-scale
+independent audit.</p>
+<a class="btn" href="/">Run the free scan →</a></div>
+"""
+
+PRIVACY_BODY = """
+<div class="card"><b>The short version</b><br><span style="color:var(--mut)">
+We collect the minimum needed to run a test and send you the results. We don't sell your data, we don't share
+it with advertisers, and we never ask for passwords, payment or wallet details.</span></div>
+
+<div class="card"><b>What we collect</b><br><span style="color:var(--mut)">
+• The store domain you submit to the scanner.<br>
+• Your email address — only if you request a full audit or ask us to send findings.<br>
+• Standard server logs (IP, timestamp) for security and reliability.</span></div>
+
+<div class="card"><b>How we use it</b><br><span style="color:var(--mut)">
+Only to run the requested test, deliver the results, and reply to you about them. We do not sell, rent or
+trade your information, and we don't load third-party advertising trackers.</span></div>
+
+<div class="card"><b>Access &amp; deletion</b><br><span style="color:var(--mut)">
+Email <a href="mailto:mahmood@canaishopyou.com">mahmood@canaishopyou.com</a> any time to see what we hold
+about you, or to have it deleted.</span></div>
+"""
+
+TERMS_BODY = """
+<div class="card"><b>What the service is</b><br><span style="color:var(--mut)">
+CanAIShopYou provides independent tests of how AI shopping systems handle online stores. Findings are
+<b>observations under stated conditions</b> — a specific AI model, on a specific date, in a specific test
+environment — not guarantees of how every AI system or every shopper will behave.</span></div>
+
+<div class="card"><b>No warranty</b><br><span style="color:var(--mut)">
+The scanner and reports are provided "as is". AI systems change constantly, so findings can change too. We
+don't warrant that results are complete or error-free, and business decisions you make from them are your own.</span></div>
+
+<div class="card"><b>Acceptable use</b><br><span style="color:var(--mut)">
+Use the scanner only on stores you own or are authorised to test. Don't use the service to attempt to harm,
+overload or misrepresent any third party.</span></div>
+
+<div class="card"><b>Independence</b><br><span style="color:var(--mut)">
+CanAIShopYou is not affiliated with, sponsored by or endorsed by any brand we test, or by any AI provider
+(including OpenAI, Google or Anthropic). All product and company names are the property of their owners.</span></div>
+
+<div class="card"><b>Contact</b><br><span style="color:var(--mut)">
+Questions about these terms? <a href="mailto:mahmood@canaishopyou.com">mahmood@canaishopyou.com</a>.</span></div>
+"""
+
 app = Flask(__name__)
 
 @app.route("/", methods=["GET", "POST"])
@@ -484,6 +575,21 @@ def index():
 @app.route("/index-report")
 def index_report():
     return render_template_string(INDEX_PAGE, rows=list(enumerate(INDEX_ED1, 1)), scans=scan_count())
+
+@app.route("/about")
+def about_page():
+    return static_page("About", "Independent commerce intelligence for the age of AI search — how CanAIShopYou benchmarks AI discovery for DTC brands.",
+                       "About <em>CanAIShopYou</em>", "Independent commerce intelligence for the age of AI search.", ABOUT_BODY)
+
+@app.route("/privacy")
+def privacy_page():
+    return static_page("Privacy", "What data CanAIShopYou collects and how it's used. We don't sell data or ask for passwords or payment.",
+                       "Privacy", "The minimum we need, used only to run your test.", PRIVACY_BODY)
+
+@app.route("/terms")
+def terms_page():
+    return static_page("Terms", "Terms of use for CanAIShopYou — findings are observations under stated conditions, provided independently.",
+                       "Terms", "Plain terms for an independent testing service.", TERMS_BODY)
 
 @app.route("/report/<path:domain>")
 def brand_report_page(domain):
