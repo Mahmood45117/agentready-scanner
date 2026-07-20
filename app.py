@@ -6,7 +6,7 @@ Usage:  .venv/bin/python app.py            -> web UI on http://localhost:8899
 """
 import json, re, sys
 import requests
-from flask import Flask, request, render_template_string
+from flask import Flask, request, render_template_string, redirect, Response
 
 AUDIT_EMAIL = "mahmood@canaishopyou.com"   # <- where "request full audit" clicks land
 UA = "AgentReadyScanner/2.0 (+https://canaishopyou.com)"
@@ -399,13 +399,22 @@ td a:hover{color:var(--accent);border-bottom-color:var(--accent)}
 """
 
 NAV = """<div class="wrap"><div class="nav"><a class="brand" href="/">🔍 Can<span>AI</span>ShopYou</a>
-<span class="links"><a href="/">Scanner</a><a href="/index-report">The Index</a><a href="/about">About</a><a href="mailto:mahmood@canaishopyou.com">Contact</a></span></div>"""
+<span class="links"><a href="/">Scanner</a><a href="/how-it-works">How it works</a><a href="/about">About</a><a href="mailto:mahmood@canaishopyou.com">Contact</a></span></div>"""
 
 PAGE = """<!doctype html><html><head><title>CanAIShopYou — Does AI recommend your store, or a competitor?</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta property="og:title" content="Does AI recommend your store — or a competitor?">
 <meta property="og:description" content="When shoppers ask an AI what to buy, does it name your brand or a rival? We run the real questions your customers ask and show you, with reproduced evidence.">
 <meta name="description" content="Shoppers now ask AI what to buy. CanAIShopYou tests whether AI assistants recommend your store, rank a competitor above you, or get your facts wrong — reproduced and documented.">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"Organization","name":"CanAIShopYou",
+"url":"https://canaishopyou.com","email":"mahmood@canaishopyou.com",
+"description":"Independent commerce intelligence for the age of AI search — testing whether AI assistants recommend a store or its competitors, with reproduced, documented findings shared privately with each merchant.",
+"founder":{"@type":"Person","name":"Mahmood"},
+"address":{"@type":"PostalAddress","addressLocality":"Multan","addressCountry":"PK"},
+"knowsAbout":["AI search visibility","generative engine optimization","AI commerce testing"],
+"contactPoint":{"@type":"ContactPoint","email":"mahmood@canaishopyou.com","contactType":"customer support"}}
+</script>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔍</text></svg>">
 <style>""" + BASE_CSS + """</style></head><body>
 """ + NAV + """
@@ -436,7 +445,7 @@ PAGE = """<!doctype html><html><head><title>CanAIShopYou — Does AI recommend y
 </div>
 <div class="card cta"><h3>Independent &middot; reproduced &middot; private</h3>
 <p>We run the questions your customers ask an AI, reproduce every result across multiple runs, and show you exactly where you're recommended or invisible &mdash; privately, with the prompts to reproduce it. We never publish findings about a named brand.</p>
-<a class="btn" href="/index-report">How it works &rarr;</a></div>
+<a class="btn" href="/how-it-works">How it works &rarr;</a></div>
 {% endif %}
 {% if r %}
 <div class="card" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap"><span class="score c{{r.grade}}">{{r.score}}<span class="outof">/100</span></span> <span class="pill p{{r.grade}}" style="font-size:1em;padding:6px 16px">GRADE {{r.grade}}</span> <span class="dom">{{r.domain}}</span></div>
@@ -450,7 +459,7 @@ PAGE = """<!doctype html><html><head><title>CanAIShopYou — Does AI recommend y
 <p style="margin-top:12px;font-size:.85em;color:var(--dim)">or email <a href="mailto:mahmood@canaishopyou.com">mahmood@canaishopyou.com</a></p></div>
 {% endif %}
 <div class="foot">CanAIShopYou · independent AI-commerce testing &amp; the Agent-Ready Index · Multan, Pakistan<br>
-<a href="/about">About</a> · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · <a href="/index-report">The Index</a> · <a href="mailto:mahmood@canaishopyou.com">mahmood@canaishopyou.com</a></div>
+<a href="/about">About</a> · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · <a href="/how-it-works">How it works</a> · <a href="mailto:mahmood@canaishopyou.com">mahmood@canaishopyou.com</a></div>
 </div></body></html>"""
 
 INDEX_PAGE = """<!doctype html><html><head><title>Independent AI-Commerce Testing | CanAIShopYou</title>
@@ -578,6 +587,31 @@ def index():
     return render_template_string(PAGE, r=r, domain=domain, scans=scan_count(), recent=recent_scans())
 
 @app.route("/index-report")
+def index_report_legacy():
+    # old path sounded like scanner-bait to trust checkers; permanent-redirect to the human name
+    return redirect("/how-it-works", code=301)
+
+@app.route("/robots.txt")
+def robots_txt():
+    # open to all crawlers incl. the AI search/user-fetch bots — we practice what we recommend
+    return Response(
+        "User-agent: *\nAllow: /\n\n"
+        "User-agent: OAI-SearchBot\nAllow: /\n\n"
+        "User-agent: ChatGPT-User\nAllow: /\n\n"
+        "User-agent: Claude-SearchBot\nAllow: /\n\n"
+        "User-agent: PerplexityBot\nAllow: /\n\n"
+        "Sitemap: https://canaishopyou.com/sitemap.xml\n",
+        mimetype="text/plain")
+
+@app.route("/sitemap.xml")
+def sitemap_xml():
+    pages = ["", "how-it-works", "about", "privacy", "terms"]
+    urls = "".join(f"<url><loc>https://canaishopyou.com/{p}</loc></url>" for p in pages)
+    return Response('<?xml version="1.0" encoding="UTF-8"?>'
+                    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+                    + urls + "</urlset>", mimetype="application/xml")
+
+@app.route("/how-it-works")
 def index_report():
     return render_template_string(INDEX_PAGE, rows=list(enumerate(INDEX_ED1, 1)), scans=scan_count())
 
