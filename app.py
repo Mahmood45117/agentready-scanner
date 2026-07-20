@@ -406,6 +406,7 @@ PAGE = """<!doctype html><html><head><title>CanAIShopYou — Does AI recommend y
 <meta property="og:title" content="Does AI recommend your store — or a competitor?">
 <meta property="og:description" content="When shoppers ask an AI what to buy, does it name your brand or a rival? We run the real questions your customers ask and show you, with reproduced evidence.">
 <meta name="description" content="Shoppers now ask AI what to buy. CanAIShopYou tests whether AI assistants recommend your store, rank a competitor above you, or get your facts wrong — reproduced and documented.">
+<meta name="google-site-verification" content="W_rODKils0f-T6_EvgJ2IX1lK8MGErJIpzL1aIey4L4" />
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"Organization","name":"CanAIShopYou",
 "url":"https://canaishopyou.com","email":"mahmood@canaishopyou.com",
