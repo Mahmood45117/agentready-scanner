@@ -422,7 +422,7 @@ PAGE = """<!doctype html><html><head><title>CanAIShopYou — Does AI recommend y
 <div class="card" style="border-left:3px solid var(--accent)">
 <div style="font-size:.72em;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--accent)">A real finding &mdash; brand name withheld</div>
 <p style="margin:10px 0 6px;font-size:1.08em;line-height:1.55;color:var(--ink)">In a controlled <b>Claude</b> test we asked the exact question a shopper types &mdash; <i>&ldquo;best fresh dog food brands&rdquo;</i>. one of the category's best-known DTC challenger brands was <b>out-ranked by its top competitor in 3 of 3 runs</b>, and dropped from the list entirely when we asked as a first-time buyer.</p>
-<p style="margin:0;color:var(--mut);font-size:.95em">The brand had no idea. We reproduce every finding, document the exact prompts, and send them privately &mdash; we never publish findings about a named store. <b>This is what we test on yours.</b></p>
+<p style="margin:0;color:var(--mut);font-size:.95em">The brand had no idea. We reproduce every finding, document the exact prompts, and send them privately &mdash; we never publish findings about a named store. <b>This is what we test on yours &mdash; and your result is shared only with you.</b></p>
 </div>
 <div class="steps">
 <div class="step"><span class="n">STEP 1</span><h4>🔍 Free readability scan</h4><p>Can AI even read your store? Structured data, crawler access, the machine layer AI depends on. Free, 30 seconds &mdash; no signup.</p></div>
