@@ -441,8 +441,8 @@ PAGE = """<!doctype html><html><head><title>CanAIShopYou — Does AI recommend y
 </div>
 <div class="price">
 <div class="tier"><b>Free</b><div class="per">instant readability scan</div><ul><li>5 automated checks</li><li>Scored report card</li><li>No signup</li></ul></div>
-<div class="tier"><b>$500</b><div class="per">AI Visibility Diagnostic · 5 days</div><ul><li>5 reproduced findings</li><li>The competitors AI names instead of you</li><li>Any price/fact errors + the exact prompts</li></ul></div>
-<div class="tier"><b>$300<span class="per">/mo</span></b><div class="per">AI Visibility Monitor</div><ul><li>We re-run your visibility each month</li><li>Alerts when AI shifts to a new competitor</li><li>You get the trend; your team acts</li></ul></div>
+<div class="tier"><b>Diagnostic</b><div class="per">reproduced findings · 5 days</div><ul><li>The competitors AI names instead of you</li><li>Every finding reproduced across multiple runs</li><li>The exact prompts, so you can verify it yourself</li></ul></div>
+<div class="tier"><b>Pilot</b><div class="per">diagnosis · fix · measured retest</div><ul><li>A prioritised, evidence-graded fix list</li><li>We implement or spec the fix</li><li>30-day retest — measured, not claimed</li></ul></div>
 </div>
 <div class="card cta"><h3>Independent &middot; reproduced &middot; private</h3>
 <p>We run the questions your customers ask an AI, reproduce every result across multiple runs, and show you exactly where you're recommended or invisible &mdash; privately, with the prompts to reproduce it. We never publish findings about a named brand.</p>
@@ -452,7 +452,7 @@ PAGE = """<!doctype html><html><head><title>CanAIShopYou — Does AI recommend y
 <div class="card" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap"><span class="score c{{r.grade}}">{{r.score}}<span class="outof">/100</span></span> <span class="pill p{{r.grade}}" style="font-size:1em;padding:6px 16px">GRADE {{r.grade}}</span> <span class="dom">{{r.domain}}</span></div>
 {% for name,status,pts,detail in r.checks %}<div class="card"><span class="{{status}}">{{status}}</span> &nbsp; <b>{{name}}</b> <span class="grade" style="font-size:.85em">({{pts}} pts)</span><br><span style="color:var(--mut)">{{detail}}</span></div>{% endfor %}
 <div class="card cta"><h3>That was the readability scan — now see what AI actually says about you.</h3>
-<p>The <b>$500 AI Visibility Diagnostic</b> runs the real questions your customers ask an AI and shows you where you're recommended, where a competitor is ranked above you, and any price or facts it gets wrong —<br>reproduced across multiple runs, with the exact prompts. Delivered in 5 days.</p>
+<p>The <b>AI Visibility Diagnostic</b> runs the real questions your customers ask an AI and shows you where you're recommended, where a competitor is ranked above you, and any price or facts it gets wrong —<br>reproduced across multiple runs, with the exact prompts. Delivered in 5 days.</p>
 <form method="post" action="/request" style="display:flex;gap:10px;max-width:460px;margin:0 auto;flex-wrap:wrap;justify-content:center">
 <input type="hidden" name="domain" value="{{r.domain}}"><input type="hidden" name="score" value="{{r.score}}">
 <input name="email" type="email" placeholder="you@yourstore.com" required style="flex:1;min-width:220px">
