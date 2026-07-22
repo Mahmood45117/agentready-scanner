@@ -102,6 +102,68 @@ def _ai_forms(brand, niche, rivals):
 def _selfm(a, b):
     a, b = (a or "").lower(), (b or "").lower(); return bool(a) and (a == b or a in b or b in a)
 
+# ── Multi-engine: query the AI assistants shoppers actually use (Claude / ChatGPT / Perplexity) ──
+AI_OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+AI_PPLX_MODEL   = os.environ.get("PERPLEXITY_MODEL", "sonar")
+
+def _file_key(*files):
+    here = os.path.dirname(os.path.abspath(__file__))
+    for p in files:
+        try:
+            k = open(os.path.join(here, p)).read().strip()
+            if k: return k
+        except Exception: pass
+    return None
+def _openai_key(): return os.environ.get("OPENAI_API_KEY") or _file_key("../cani/.openai_key", "cani/.openai_key")
+def _pplx_key():   return os.environ.get("PERPLEXITY_API_KEY") or _file_key("../cani/.perplexity_key", "cani/.perplexity_key")
+
+def _oa_pick(qtext, brand):
+    # ChatGPT via OpenAI — forced function call returns the structured pick in one shot.
+    key = _openai_key()
+    if not key: return None
+    tools = [{"type": "function", "function": {"name": "record_pick",
+              "description": f"Record the brand you'd genuinely recommend. mentions_brand = would you recommend {brand}?",
+              "parameters": {"type": "object", "properties": {
+                  "mentions_brand": {"type": "boolean"},
+                  "winner": {"type": "string", "description": "the single #1 brand you steer this shopper to; empty if none"}},
+                  "required": ["mentions_brand", "winner"]}}}]
+    r = requests.post("https://api.openai.com/v1/chat/completions",
+        headers={"Authorization": f"Bearer {key}"},
+        json={"model": AI_OPENAI_MODEL, "max_tokens": 300,
+              "messages": [{"role": "system", "content": AI_SYS}, {"role": "user", "content": qtext + " Give your genuine pick."}],
+              "tools": tools, "tool_choice": {"type": "function", "function": {"name": "record_pick"}}},
+        timeout=15)
+    r.raise_for_status()
+    return _json.loads(r.json()["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"])
+
+def _pplx_answer(qtext):
+    # Perplexity is web-grounded — closest to a real "AI shopper." Prose answer; Claude extracts the pick.
+    key = _pplx_key()
+    if not key: return None
+    r = requests.post("https://api.perplexity.ai/chat/completions",
+        headers={"Authorization": f"Bearer {key}"},
+        json={"model": AI_PPLX_MODEL, "max_tokens": 500,
+              "messages": [{"role": "system", "content": AI_SYS}, {"role": "user", "content": qtext}]},
+        timeout=15)
+    r.raise_for_status()
+    return r.json()["choices"][0]["message"]["content"]
+
+def _extract_pick(client, answer, brand):
+    # Claude forced-tool extraction of the pick from any engine's prose answer.
+    if not answer: return {}
+    tool = {"name": "record_pick", "description": "Extract the shopping recommendation from an answer.",
+            "input_schema": {"type": "object", "properties": {
+                "mentions_brand": {"type": "boolean", "description": f"Does the answer recommend {brand}?"},
+                "winner": {"type": "string", "description": "the single #1 brand the answer steers the shopper to; empty if none"}},
+                "required": ["mentions_brand", "winner"]}}
+    m = client.messages.create(model=AI_MODEL, max_tokens=150,
+        system="You extract structured facts from a shopping answer. Be literal; add no opinions.",
+        tools=[tool], tool_choice={"type": "tool", "name": "record_pick"},
+        messages=[{"role": "user", "content": f'A shopper asked an AI to recommend brands in {brand}\'s category. It answered:\n\n"""{answer[:1500]}"""\n\nRecord the single brand it recommends #1, and whether it recommends {brand}.'}])
+    for b in m.content:
+        if getattr(b, "type", "") == "tool_use" and isinstance(getattr(b, "input", None), dict): return dict(b.input)
+    return {}
+
 def run_ai_test(domain, niche, rivals=None):
     if not _ai_key(): return {"ok": False, "reason": "engine offline"}
     try:
@@ -110,24 +172,60 @@ def run_ai_test(domain, niche, rivals=None):
     except Exception as e:
         return {"ok": False, "reason": f"engine error: {type(e).__name__}"}
     brand = domain.split(".")[0].replace("-", " ").title()
-    results = []
-    for fk, prompt in _ai_forms(brand, niche, rivals):
-        omit = win = 0; winners = []
-        for _ in range(AI_REPS):
-            try: r = _ai_ask(client, prompt, brand)
-            except Exception as e: r = {"_answer": f"[error {type(e).__name__}]"}
-            if r.get("mentions_brand") is False: omit += 1
+    all_forms = _ai_forms(brand, niche, rivals)
+    # Engines: Claude always; ChatGPT / Perplexity join only if their key is set (so default == Claude-only).
+    engine_defs = [("Claude", lambda q: _ai_ask(client, q, brand))]
+    if _openai_key(): engine_defs.append(("ChatGPT", lambda q: _oa_pick(q, brand)))
+    if _pplx_key():   engine_defs.append(("Perplexity", lambda q: _extract_pick(client, _pplx_answer(q), brand)))
+    multi = len(engine_defs) > 1
+    forms = all_forms[:1] if multi else all_forms   # 1 question x N engines when multi (bounds latency); 3 ways when Claude-only
+
+    def _run_engine(name, picker):
+        rows = []
+        for fk, prompt in forms:
+            try: r = picker(prompt) or {}
+            except Exception as ex:
+                import sys as _s; print(f"[engine {name}] {type(ex).__name__}: {str(ex)[:120]}", file=_s.stderr); r = {"_err": type(ex).__name__}
             w = (r.get("winner") or "").strip()
-            if w and not _selfm(w, brand): win += 1; winners.append(w)
-        results.append({"f": fk, "omit": omit, "win": win, "reps": AI_REPS,
-                        "winner": winners[0] if winners else "", "prompt": prompt})
-    strong = sum(1 for r in results if r["omit"] > AI_REPS/2 or r["win"] > AI_REPS/2)
-    verdict = "SURVIVES" if strong >= 2 else "PARTIAL" if strong == 1 else "COLLAPSES"
-    comps = [r["winner"] for r in results if r["winner"]]
+            lost = bool(w and not _selfm(w, brand))
+            rows.append({"f": fk, "winner": w if lost else "", "prompt": prompt,
+                         "omit": r.get("mentions_brand") is False, "err": r.get("_err")})
+        wins = [x["winner"] for x in rows if x["winner"]]
+        top = max(set(wins), key=wins.count) if wins else ""
+        return {"engine": name, "rows": rows, "lost_ct": len(wins), "total": len(forms),
+                "competitor": top, "ok": sum(1 for x in rows if x["err"]) < len(forms)}
+
+    engines = []
+    try:
+        from concurrent.futures import ThreadPoolExecutor, wait
+        ex = ThreadPoolExecutor(max_workers=len(engine_defs))
+        futs = [ex.submit(_run_engine, n, p) for n, p in engine_defs]
+        done, _ = wait(futs, timeout=26)                 # hard latency bound; a stalled engine is dropped
+        for f in done:
+            try:
+                e = f.result()
+                if e and e.get("ok"): engines.append(e)
+            except Exception: pass
+        ex.shutdown(wait=False)
+    except Exception:
+        for n, p in engine_defs:
+            try:
+                e = _run_engine(n, p)
+                if e and e.get("ok"): engines.append(e)
+            except Exception: pass
+    if not engines: return {"ok": False, "reason": "engines unavailable"}
+    order = {"Claude": 0, "ChatGPT": 1, "Perplexity": 2}
+    engines.sort(key=lambda e: order.get(e["engine"], 9))
+
+    def _eng_lost(e): return e["lost_ct"] > e["total"] / 2
+    n = len(engines); nlost = sum(1 for e in engines if _eng_lost(e))
+    verdict = "SURVIVES" if nlost == n else ("PARTIAL" if nlost >= 1 else "COLLAPSES")
+    comps = [e["competitor"] for e in engines if e["competitor"]]
     top = max(set(comps), key=comps.count) if comps else ""
     return {"ok": True, "brand": brand, "niche": niche, "verdict": verdict, "competitor": top,
-            "runs_lost": sum(r["win"] for r in results), "runs_total": len(results)*AI_REPS,
-            "results": results, "date": datetime.date.today().isoformat()}
+            "engines": engines, "n_engines": n, "engines_lost": nlost,
+            "runs_lost": sum(e["lost_ct"] for e in engines), "runs_total": sum(e["total"] for e in engines),
+            "date": datetime.date.today().isoformat()}
 
 def _ai_allowed(ip):
     d = _load(); now = _utcnow(); runs = d.get("ai_runs", [])
@@ -152,27 +250,52 @@ def _ai_fix_rows(niche, competitor):
 
 def render_ai_result(res, domain, email):
     dom = _html.escape(domain); comp = _html.escape(res.get("competitor") or "a competitor"); niche = _html.escape(res.get("niche") or "")
+    engines = res.get("engines", []); n = res.get("n_engines", len(engines))
+    elist = ", ".join(e["engine"] for e in engines) or "AI"
+    def _eng_lost(e): return e["lost_ct"] > e["total"] / 2
+    nlost = res.get("engines_lost", sum(1 for e in engines if _eng_lost(e))); multi = n > 1
     if res["verdict"] == "SURVIVES":
-        head = (f"Ask AI for the best <b>{niche}</b> and it recommended <b style='color:#b3261e'>{comp}</b> over you "
-                f"in <b>{res['runs_lost']} of {res['runs_total']} runs</b> — reproduced across every way we asked.")
+        head = ((f"Every AI engine we tested — <b>{_html.escape(elist)}</b> — sent shoppers looking for the best "
+                 f"<b>{niche}</b> to <b style='color:#b3261e'>{comp}</b>, not you.") if multi else
+                (f"Ask <b>{_html.escape(elist)}</b> for the best <b>{niche}</b> and it recommended "
+                 f"<b style='color:#b3261e'>{comp}</b> over you — reproduced across every way we asked."))
         bg = "#fff6f6"
     elif res["verdict"] == "PARTIAL":
-        head = f"Ask AI for the best <b>{niche}</b> and the answer was <b>mixed</b> — a competitor was preferred in some phrasings, not all."; bg = "#fffaf0"
+        head = (f"<b>{comp}</b> is beating you on some AI engines but not all — <b>{nlost} of {n}</b> "
+                f"engines steered <b>{niche}</b> shoppers to a competitor."); bg = "#fffaf0"
     else:
-        head = f"Ask AI for the best <b>{niche}</b> and you actually held up — no consistent competitor preference. (We test both ways; this one's on your side.)"; bg = "#f2fbf5"
-    rows = "".join(f"<tr><td style='padding:7px;border-bottom:1px solid #eee;white-space:nowrap'><b>{r['f']}</b></td>"
-                   f"<td style='padding:7px;border-bottom:1px solid #eee'>{('<span style=color:#b3261e>chose '+_html.escape(r['winner'])+'</span>') if r['winner'] else 'held up'}</td>"
-                   f"<td style='padding:7px;border-bottom:1px solid #eee'><code style='font-size:.82em'>{_html.escape(r['prompt'])}</code></td></tr>" for r in res["results"])
+        head = (f"You held up — none of the engines we tested (<b>{_html.escape(elist)}</b>) consistently "
+                f"preferred a competitor for <b>{niche}</b>. This one's on your side."); bg = "#f2fbf5"
+    erows = ""
+    for e in engines:
+        ways = f" <span style='color:#888'>({e['lost_ct']} of {e['total']} ways)</span>" if e["total"] > 1 else ""
+        if e["competitor"] and _eng_lost(e):
+            cell = f"<span style='color:#b3261e'>→ recommended {_html.escape(e['competitor'])}</span>{ways}"
+        elif e["competitor"]:
+            cell = f"<span style='color:#8a6d00'>mixed — {_html.escape(e['competitor'])} in {e['lost_ct']} of {e['total']}</span>"
+        else:
+            cell = "<span style='color:#0a7d3c'>held up — recommended you / no clear competitor</span>"
+        erows += (f"<tr><td style='padding:9px;border-bottom:1px solid #eee;font-weight:700;white-space:nowrap'>{_html.escape(e['engine'])}</td>"
+                  f"<td style='padding:9px;border-bottom:1px solid #eee'>{cell}</td></tr>")
+    qs = engines[0]["rows"] if engines else []
+    ql = "".join(f"<li style='margin:4px 0'><code style='font-size:.82em'>{_html.escape(x['prompt'])}</code></li>" for x in qs)
     fix = ("" if res["verdict"] == "COLLAPSES" else
            f"<div class='card'><h3>How we fix it</h3><table style='width:100%;border-collapse:collapse;font-size:.9em'>{_ai_fix_rows(res.get('niche',''), res.get('competitor',''))}</table>"
            f"<p style='margin-top:10px'>Half up front — the other half only if the 30-day retest shows the number moved. No agency offers that.</p>"
            f"<a class='btn' href='mailto:mahmood@canaishopyou.com?subject=Fix%20plan%20for%20{dom}'>Get my fix plan →</a></div>")
+    notes = []
+    if any(e["engine"] in ("Claude", "ChatGPT") for e in engines): notes.append("ChatGPT &amp; Claude via API (no live browsing)")
+    if any(e["engine"] == "Perplexity" for e in engines): notes.append("Perplexity is web-grounded")
+    label = (f"Controlled test across <b>{_html.escape(elist)}</b>" + (" · one question per engine" if multi else " · asked 3 ways")
+             + ". " + ("; ".join(notes) + ". " if notes else "") + "Paste any question below into the real thing to check.")
     body = (f"<div class='wrap'><div class='card' style='background:{bg};border:1px solid #eadada;margin-top:40px'>"
             f"<div style='color:#0a7d3c;font-weight:700;font-size:12px'>LIVE AI-VISIBILITY TEST · {res['date']}</div>"
             f"<h2 style='margin:.2em 0'>{dom}</h2><p style='font-size:1.05em'>{head}</p>"
-            f"<table style='width:100%;border-collapse:collapse;font-size:.9em;margin-top:6px'>"
-            f"<tr><th style='text-align:left;padding:7px'>How we asked</th><th style='text-align:left;padding:7px'>Result</th><th style='text-align:left;padding:7px'>Prompt (verify it)</th></tr>{rows}</table>"
-            f"<p style='font-size:.82em;color:#666;margin-top:8px'>Controlled test on {AI_MODEL} · asked 3 different ways (broad, use-case, head-to-head) · browsing off. Paste any prompt into ChatGPT or Claude to check.</p></div>"
+            f"<table style='width:100%;border-collapse:collapse;font-size:.95em;margin-top:8px'>"
+            f"<tr><th style='text-align:left;padding:9px'>AI engine</th><th style='text-align:left;padding:9px'>What it told shoppers</th></tr>{erows}</table>"
+            f"<details style='margin-top:10px'><summary style='cursor:pointer;font-size:.85em;color:#555'>The exact question(s) we asked — verify it yourself</summary>"
+            f"<ul style='margin:8px 0 0'>{ql}</ul></details>"
+            f"<p style='font-size:.8em;color:#666;margin-top:8px'>{label}</p></div>"
             f"{fix}<p style='text-align:center'><a href='/'>← test another</a></p></div>")
     return body
 
