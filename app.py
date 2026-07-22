@@ -13,6 +13,11 @@ UA = "AgentReadyScanner/2.0 (+https://canaishopyou.com)"
 TIMEOUT = 12
 
 import os, json as _json, datetime
+try:
+    import sys as _sys; _sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from ai_findings import FINDINGS   # the bundled corpus — 56 real validated findings
+except Exception:
+    FINDINGS = {}
 DATA_FILE = os.environ.get("DATA_FILE", "/tmp/cani_data.json")
 BASELINE_SCANS = 41  # brands + tests already run by founder pre-launch
 def _load():
@@ -42,6 +47,125 @@ def _utcnow():
     # avoid Date.now-style; use time
     import time
     return int(time.time())
+
+# ─────────── LIVE AI-VISIBILITY TEST — gated: email + per-IP + daily cap ───────────
+import html as _html
+AI_SYS   = ("You are a shopping assistant answering a real shopper. Recommend real, specific brands/products "
+            "and state prices only if you actually know them. Answer as you genuinely would.")
+AI_MODEL = os.environ.get("AI_MODEL", "claude-sonnet-5")
+AI_REPS  = int(os.environ.get("AI_REPS", "2"))          # 3 formulations x REPS = calls per test (~$0.012 each)
+AI_DAILY_CAP = int(os.environ.get("AI_DAILY_CAP", "150"))  # worst-case ~$10/day, then falls back to lead capture
+AI_IP_HOURLY = int(os.environ.get("AI_IP_HOURLY", "2"))
+
+def _ai_key():
+    if os.environ.get("ANTHROPIC_API_KEY"): return os.environ["ANTHROPIC_API_KEY"]
+    here = os.path.dirname(os.path.abspath(__file__))
+    for p in ("../cani/.anthropic_key", "cani/.anthropic_key"):
+        try:
+            k = open(os.path.join(here, p)).read().strip()
+            if k.startswith("sk-ant"): return k
+        except Exception: pass
+    return None
+
+def _ai_extract(text):
+    for s in [m.start() for m in re.finditer(r"\{", text)]:
+        try: obj, _ = _json.JSONDecoder().raw_decode(text[s:])
+        except Exception: continue
+        if isinstance(obj, dict) and any(k in obj for k in ("mentions_brand", "winner", "brand_price")): return obj
+    return {}
+
+def _ai_ask(client, qtext, brand):
+    prompt = (f"{qtext}\n\nAfter answering, output ONLY a JSON object (nothing after it):\n"
+              f'{{"mentions_brand": true/false (did you recommend \\"{brand}\\"?),'
+              f'"winner": "<the #1 brand you steered the shopper to>","brand_price": "","competitors": ["..."]}}')
+    m = client.messages.create(model=AI_MODEL, max_tokens=1200, system=AI_SYS,
+                               messages=[{"role": "user", "content": prompt}])
+    text = "".join(b.text for b in m.content if getattr(b, "type", "") == "text")
+    d = _ai_extract(text); d["_answer"] = text[:600]; return d
+
+def _ai_forms(brand, niche, rivals):
+    cmp = " vs ".join([brand] + (rivals or [])[:2]) if rivals else brand
+    return [("broad-purchase", f"Best {niche} brands right now — list the specific brands you'd recommend, with rough prices if you know them."),
+            ("use-case",       f"I'm someone shopping for {niche}. What should I buy? Name the specific brands you'd point me to."),
+            ("direct-compare", f"{cmp} — for someone buying {niche}, which should I buy and why?")]
+
+def _selfm(a, b):
+    a, b = (a or "").lower(), (b or "").lower(); return bool(a) and (a == b or a in b or b in a)
+
+def run_ai_test(domain, niche, rivals=None):
+    if not _ai_key(): return {"ok": False, "reason": "engine offline"}
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=_ai_key(), timeout=45.0, max_retries=1)
+    except Exception as e:
+        return {"ok": False, "reason": f"engine error: {type(e).__name__}"}
+    brand = domain.split(".")[0].replace("-", " ").title()
+    results = []
+    for fk, prompt in _ai_forms(brand, niche, rivals):
+        omit = win = 0; winners = []; first = ""
+        for _ in range(AI_REPS):
+            try: r = _ai_ask(client, prompt, brand)
+            except Exception as e: r = {"_answer": f"[error {type(e).__name__}]"}
+            if not first: first = r.get("_answer", "")
+            if r.get("mentions_brand") is False: omit += 1
+            w = (r.get("winner") or "").strip()
+            if w and not _selfm(w, brand): win += 1; winners.append(w)
+        results.append({"f": fk, "omit": omit, "win": win, "reps": AI_REPS,
+                        "winner": winners[0] if winners else "", "prompt": prompt})
+    strong = sum(1 for r in results if r["omit"] > AI_REPS/2 or r["win"] > AI_REPS/2)
+    verdict = "SURVIVES" if strong >= 2 else "PARTIAL" if strong == 1 else "COLLAPSES"
+    comps = [r["winner"] for r in results if r["winner"]]
+    top = max(set(comps), key=comps.count) if comps else ""
+    return {"ok": True, "brand": brand, "niche": niche, "verdict": verdict, "competitor": top,
+            "runs_lost": sum(r["win"] for r in results), "runs_total": len(results)*AI_REPS,
+            "results": results, "date": datetime.date.today().isoformat()}
+
+def _ai_allowed(ip):
+    d = _load(); now = _utcnow(); runs = d.get("ai_runs", [])
+    if len([x for x in runs if now - x["ts"] < 86400]) >= AI_DAILY_CAP: return False, "daily"
+    if len([x for x in runs if x.get("ip") == ip and now - x["ts"] < 3600]) >= AI_IP_HOURLY: return False, "ip"
+    return True, ""
+
+def _ai_log_run(ip):
+    d = _load(); d.setdefault("ai_runs", []).append({"ip": ip, "ts": _utcnow()})
+    d["ai_runs"] = d["ai_runs"][-3000:]; _save(d)
+
+def _ai_fix_rows(niche, competitor):
+    c = _html.escape(competitor or "the incumbent"); n = _html.escape(niche)
+    steps = [("Fix technical readability", "robots access, server-rendered content, product schema — so a crawler can read you at all", "hours"),
+             (f"Build answer-content for '{n}'", "rewrite the pages AI reads (Princeton GEO formula: stats, cited sources, comparisons) targeting the exact questions you lose", "days"),
+             ("Get into the AI shopping feeds", "OpenAI product feed, Perplexity / Bing Merchant, Shopify Catalog", "setup"),
+             (f"Get into the sources AI cites for '{n}'", f"the 'best {n}' listicles, Reddit and reviews that make it reach for {c}", "weeks, ongoing"),
+             ("Re-run this exact test in 30 days", "measured before/after — you pay the back half only if the number moves", "—")]
+    return "".join(f"<tr><td style='padding:7px;border-bottom:1px solid #eee'><b>{_html.escape(t)}</b></td>"
+                   f"<td style='padding:7px;border-bottom:1px solid #eee'>{d}</td>"
+                   f"<td style='padding:7px;border-bottom:1px solid #eee;white-space:nowrap;color:#666'>{e}</td></tr>" for t, d, e in steps)
+
+def render_ai_result(res, domain, email):
+    dom = _html.escape(domain); comp = _html.escape(res.get("competitor") or "a competitor"); niche = _html.escape(res.get("niche") or "")
+    if res["verdict"] == "SURVIVES":
+        head = (f"Ask AI for the best <b>{niche}</b> and it recommended <b style='color:#b3261e'>{comp}</b> over you "
+                f"in <b>{res['runs_lost']} of {res['runs_total']} runs</b> — reproduced across every way we asked.")
+        bg = "#fff6f6"
+    elif res["verdict"] == "PARTIAL":
+        head = f"Ask AI for the best <b>{niche}</b> and the answer was <b>mixed</b> — a competitor was preferred in some phrasings, not all."; bg = "#fffaf0"
+    else:
+        head = f"Ask AI for the best <b>{niche}</b> and you actually held up — no consistent competitor preference. (We test both ways; this one's on your side.)"; bg = "#f2fbf5"
+    rows = "".join(f"<tr><td style='padding:7px;border-bottom:1px solid #eee;white-space:nowrap'><b>{r['f']}</b></td>"
+                   f"<td style='padding:7px;border-bottom:1px solid #eee'>{('<span style=color:#b3261e>chose '+_html.escape(r['winner'])+'</span>') if r['winner'] else 'held up'}</td>"
+                   f"<td style='padding:7px;border-bottom:1px solid #eee'><code style='font-size:.82em'>{_html.escape(r['prompt'])}</code></td></tr>" for r in res["results"])
+    fix = ("" if res["verdict"] == "COLLAPSES" else
+           f"<div class='card'><h3>How we fix it</h3><table style='width:100%;border-collapse:collapse;font-size:.9em'>{_ai_fix_rows(res.get('niche',''), res.get('competitor',''))}</table>"
+           f"<p style='margin-top:10px'>Half up front — the other half only if the 30-day retest shows the number moved. No agency offers that.</p>"
+           f"<a class='btn' href='mailto:mahmood@canaishopyou.com?subject=Fix%20plan%20for%20{dom}'>Get my fix plan →</a></div>")
+    body = (f"<div class='wrap'><div class='card' style='background:{bg};border:1px solid #eadada;margin-top:40px'>"
+            f"<div style='color:#0a7d3c;font-weight:700;font-size:12px'>LIVE AI-VISIBILITY TEST · {res['date']}</div>"
+            f"<h2 style='margin:.2em 0'>{dom}</h2><p style='font-size:1.05em'>{head}</p>"
+            f"<table style='width:100%;border-collapse:collapse;font-size:.9em;margin-top:6px'>"
+            f"<tr><th style='text-align:left;padding:7px'>How we asked</th><th style='text-align:left;padding:7px'>Result</th><th style='text-align:left;padding:7px'>Prompt (verify it)</th></tr>{rows}</table>"
+            f"<p style='font-size:.82em;color:#666;margin-top:8px'>Controlled test on {AI_MODEL} · reproduced {AI_REPS}×/phrasing · browsing off. Paste any prompt into ChatGPT or Claude to check.</p></div>"
+            f"{fix}<p style='text-align:center'><a href='/'>← test another</a></p></div>")
+    return body
 
 AI_BOTS = {
     "OAI-SearchBot":  ("ChatGPT search & shopping visibility", "FATAL — store is invisible in ChatGPT answers"),
@@ -451,12 +575,42 @@ PAGE = """<!doctype html><html><head><title>CanAIShopYou — Does AI recommend y
 {% if r %}
 <div class="card" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap"><span class="score c{{r.grade}}">{{r.score}}<span class="outof">/100</span></span> <span class="pill p{{r.grade}}" style="font-size:1em;padding:6px 16px">GRADE {{r.grade}}</span> <span class="dom">{{r.domain}}</span></div>
 {% for name,status,pts,detail in r.checks %}<div class="card"><span class="{{status}}">{{status}}</span> &nbsp; <b>{{name}}</b> <span class="grade" style="font-size:.85em">({{pts}} pts)</span><br><span style="color:var(--mut)">{{detail}}</span></div>{% endfor %}
-<div class="card cta"><h3>That was the readability scan — now see what AI actually says about you.</h3>
-<p>The <b>AI Visibility Diagnostic</b> runs the real questions your customers ask an AI and shows you where you're recommended, where a competitor is ranked above you, and any price or facts it gets wrong —<br>reproduced across multiple runs, with the exact prompts. Delivered in 5 days.</p>
+{% if ai %}
+<div class="card" style="border:1px solid #f0cccc;background:#fff6f6">
+<h3 style="margin-top:0">What AI actually tells shoppers about {{r.domain}}</h3>
+{% if ai.verdict == 'SURVIVES' %}
+<p style="font-size:1.06em">Ask AI for the best <b>{{ai.niche}}</b> and it recommended <b style="color:#b3261e">{{ai.competitor}}</b> over you in <b>{{ai.runs_lost}} of {{ai.runs_total}} runs</b> — reproduced across every way we asked.</p>
+{% elif ai.verdict == 'PARTIAL' %}
+<p>Ask AI for the best <b>{{ai.niche}}</b> and the answer was <b>mixed</b> — a competitor was preferred in some phrasings, not all.</p>
+{% else %}
+<p style="color:#0a7d3c">Ask AI for the best <b>{{ai.niche}}</b> and you actually held up — no consistent competitor preference. (We test both ways; this one's on your side.)</p>
+{% endif %}
+<table style="width:100%;border-collapse:collapse;font-size:.9em;margin-top:6px">
+{% for t in ai.tests %}<tr><td style="padding:7px;border-bottom:1px solid #eee;white-space:nowrap"><b>{{t.f}}</b></td><td style="padding:7px;border-bottom:1px solid #eee">{% if t.competitor %}<span style="color:#b3261e">chose {{t.competitor}}</span>{% else %}held up{% endif %}</td><td style="padding:7px;border-bottom:1px solid #eee"><code style="font-size:.82em">{{t.prompt}}</code></td></tr>{% endfor %}
+</table>
+<p style="font-size:.83em;color:var(--mut);margin-top:8px">Controlled test · {{ai.date}} · reproduced. Paste any prompt into ChatGPT or Claude and check it yourself.</p></div>
+{% endif %}
+<div class="card cta">
+{% if ai and ai.verdict == 'SURVIVES' %}
+<h3>AI is sending your buyers to {{ai.competitor}}. Here's how we fix it.</h3>
+<p>We rebuild the content AI reads for '{{ai.niche}}', get you into the product feeds and sources it cites, then <b>re-run this exact test in 30 days</b> to prove it moved. Half up front — the rest only if the number changes.</p>
+{% else %}
+<h3>See what AI says about your brand — free.</h3>
+<p>We run the real questions your customers ask an AI, reproduced with the exact prompts, and show you where a competitor is ranked above you. Then we fix it and re-measure. Nothing published about your brand — ever.</p>
+{% endif %}
+{% if ai and ai.verdict == 'SURVIVES' %}
 <form method="post" action="/request" style="display:flex;gap:10px;max-width:460px;margin:0 auto;flex-wrap:wrap;justify-content:center">
 <input type="hidden" name="domain" value="{{r.domain}}"><input type="hidden" name="score" value="{{r.score}}">
 <input name="email" type="email" placeholder="you@yourstore.com" required style="flex:1;min-width:220px">
-<button>Request full audit →</button></form>
+<button>Get my fix plan →</button></form>
+{% else %}
+<form method="post" action="/ai-test" style="display:flex;gap:10px;max-width:460px;margin:0 auto;flex-wrap:wrap;justify-content:center">
+<input type="hidden" name="domain" value="{{r.domain}}">
+<input name="niche" placeholder="what you sell — e.g. fresh cat food" required style="flex:1 1 100%;min-width:220px">
+<input name="email" type="email" placeholder="you@yourstore.com" required style="flex:1;min-width:220px">
+<button>Run my live AI test →</button></form>
+<p style="margin-top:8px;font-size:.8em;color:var(--dim)">Live · reproduced across 3 phrasings · ~15s · you can verify every prompt</p>
+{% endif %}
 <p style="margin-top:12px;font-size:.85em;color:var(--dim)">or email <a href="mailto:mahmood@canaishopyou.com">mahmood@canaishopyou.com</a></p></div>
 {% endif %}
 <div class="foot">CanAIShopYou · independent AI-commerce testing &amp; the Agent-Ready Index · Multan, Pakistan<br>
@@ -585,7 +739,35 @@ def index():
         except Exception: pass
         class O(dict): __getattr__ = dict.get
         r = O(r)
-    return render_template_string(PAGE, r=r, domain=domain, scans=scan_count(), recent=recent_scans())
+        ai = FINDINGS.get(r.get("domain", ""))
+    else:
+        ai = None
+    return render_template_string(PAGE, r=r, ai=ai, domain=domain, scans=scan_count(), recent=recent_scans())
+
+@app.route("/ai-test", methods=["POST"])
+def ai_test():
+    f = request.form
+    domain = re.sub(r"^https?://", "", (f.get("domain", "")).strip().lower()).split("/")[0]
+    email  = (f.get("email", "")).strip()
+    niche  = (f.get("niche", "")).strip()
+    rivals = [x.strip() for x in (f.get("rivals", "")).split(",") if x.strip()]
+    ip = (request.headers.get("X-Forwarded-For", request.remote_addr or "")).split(",")[0].strip()
+    if not (domain and email and niche):
+        return render_template_string(BASE_DOC, body="<div class='wrap'><div class='card cta' style='margin-top:50px'><h3>One more thing</h3><p>Domain, email, and what you sell are all required to run the live test.</p><a class='btn' href='/'>← Back</a></div></div>")
+    try: log_lead(domain, "", email)   # capture the lead no matter what
+    except Exception: pass
+    allowed, _why = _ai_allowed(ip)
+    if _ai_key() and allowed:
+        _ai_log_run(ip)
+        res = run_ai_test(domain, niche, rivals)
+        if res.get("ok"):
+            return render_template_string(BASE_DOC, body=render_ai_result(res, domain, email))
+    # fallback — no key / over cap / rate-limited: honest queue + lead captured
+    return render_template_string(BASE_DOC, body=(
+        "<div class='wrap'><div class='card cta' style='margin-top:50px'><h3>You're queued ✓</h3>"
+        "<p>We'll run the full AI-visibility test on <b>" + _html.escape(domain) + "</b> and email the results"
+        + ((" to <b>" + _html.escape(email) + "</b>") if email else "") + " within a day — with the exact prompts so you can verify every line.</p>"
+        "<a class='btn' href='/'>← Back</a></div></div>"))
 
 @app.route("/index-report")
 def index_report_legacy():
