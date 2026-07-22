@@ -30,15 +30,46 @@ def _save(d):
         _json.dump(d, open(DATA_FILE, "w"))
     except Exception:
         pass
+def _email_lead(kind, domain, email, extra=""):
+    # Durable lead delivery: emails you the moment someone submits, so leads survive Render's
+    # ephemeral /tmp. Fully optional — if SMTP_* env vars aren't set, this no-ops silently.
+    host = os.environ.get("SMTP_HOST"); user = os.environ.get("SMTP_USER"); pw = os.environ.get("SMTP_PASS")
+    to = os.environ.get("LEAD_TO") or user
+    if not (host and user and pw and to): return
+    try:
+        import smtplib, ssl
+        from email.message import EmailMessage
+        port = int(os.environ.get("SMTP_PORT", "465"))
+        m = EmailMessage()
+        m["Subject"] = f"[CanAIShopYou] {kind} lead — {domain or email}"
+        m["From"] = user; m["To"] = to
+        if email: m["Reply-To"] = email
+        m.set_content(f"New {kind} lead\n\ndomain : {domain}\nemail  : {email}\n{extra}\n")
+        ctx = ssl.create_default_context()
+        if port == 465:
+            with smtplib.SMTP_SSL(host, port, context=ctx, timeout=12) as s:
+                s.login(user, pw); s.send_message(m)
+        else:
+            with smtplib.SMTP(host, port, timeout=12) as s:
+                s.ehlo(); s.starttls(context=ctx); s.login(user, pw); s.send_message(m)
+    except Exception:
+        import traceback, sys; traceback.print_exc(file=sys.stderr)   # log, never break the request
+def _email_lead_async(kind, domain, email, extra=""):
+    try:
+        import threading
+        threading.Thread(target=_email_lead, args=(kind, domain, email, extra), daemon=True).start()
+    except Exception:
+        pass
 def log_scan(domain, score, grade):
     d = _load()
     d["scans"].append({"domain": domain, "score": score, "grade": grade,
                        "ts": _utcnow()})
     _save(d)
-def log_lead(domain, score, email=""):
+def log_lead(domain, score, email="", extra="", kind="scan"):
     d = _load()
-    d["leads"].append({"domain": domain, "score": score, "email": email, "ts": _utcnow()})
+    d["leads"].append({"domain": domain, "score": score, "email": email, "extra": extra, "kind": kind, "ts": _utcnow()})
     _save(d)
+    _email_lead_async(kind, domain, email, extra)
 def scan_count():
     return BASELINE_SCANS + len(_load().get("scans", []))
 def recent_scans(n=5):
@@ -763,7 +794,7 @@ def ai_test():
     ip = (request.headers.get("X-Forwarded-For", request.remote_addr or "")).split(",")[0].strip()
     if not (domain and email and niche):
         return render_template_string(BASE_DOC, body="<div class='wrap'><div class='card cta' style='margin-top:50px'><h3>One more thing</h3><p>Domain, email, and what you sell are all required to run the live test.</p><a class='btn' href='/'>← Back</a></div></div>")
-    try: log_lead(domain, "", email)   # capture the lead no matter what
+    try: log_lead(domain, "", email, extra=f"category: {niche}", kind="ai-test")   # capture the lead no matter what
     except Exception: pass
     try:
         allowed, _why = _ai_allowed(ip)

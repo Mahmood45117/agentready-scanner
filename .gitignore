@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+*.key
+.anthropic_key
+*_data.json
+cani_data.json
+.DS_Store
+DEPLOY.md
+INVOICE_TEMPLATE.md
