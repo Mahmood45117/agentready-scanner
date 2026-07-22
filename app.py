@@ -30,27 +30,6 @@ def _save(d):
         _json.dump(d, open(DATA_FILE, "w"))
     except Exception:
         pass
-def _notify_lead(kind, domain, email, extra=""):
-    # Instant lead alert via Telegram (HTTPS — works on Render, unlike SMTP which Render blocks).
-    # No-ops silently if TELEGRAM_TOKEN / TELEGRAM_CHAT_ID aren't set.
-    token = os.environ.get("TELEGRAM_TOKEN"); chat = os.environ.get("TELEGRAM_CHAT_ID")
-    if not (token and chat): return
-    try:
-        text = (f"🛎️ New {kind} lead — canaishopyou\n"
-                f"domain: {domain}\n"
-                f"email: {email}\n"
-                f"{extra}").strip()
-        requests.post(f"https://api.telegram.org/bot{token}/sendMessage",
-                      json={"chat_id": chat, "text": text, "disable_web_page_preview": True},
-                      timeout=12)
-    except Exception:
-        import traceback, sys; traceback.print_exc(file=sys.stderr)   # log, never break the request
-def _notify_lead_async(kind, domain, email, extra=""):
-    try:
-        import threading
-        threading.Thread(target=_notify_lead, args=(kind, domain, email, extra), daemon=True).start()
-    except Exception:
-        pass
 def log_scan(domain, score, grade):
     d = _load()
     d["scans"].append({"domain": domain, "score": score, "grade": grade,
@@ -60,7 +39,6 @@ def log_lead(domain, score, email="", extra="", kind="scan"):
     d = _load()
     d["leads"].append({"domain": domain, "score": score, "email": email, "extra": extra, "kind": kind, "ts": _utcnow()})
     _save(d)
-    _notify_lead_async(kind, domain, email, extra)
 def scan_count():
     return BASELINE_SCANS + len(_load().get("scans", []))
 def recent_scans(n=5):
