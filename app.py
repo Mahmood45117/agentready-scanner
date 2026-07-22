@@ -53,7 +53,7 @@ import html as _html
 AI_SYS   = ("You are a shopping assistant answering a real shopper. Recommend real, specific brands/products "
             "and state prices only if you actually know them. Answer as you genuinely would.")
 AI_MODEL = os.environ.get("AI_MODEL", "claude-sonnet-5")
-AI_REPS  = int(os.environ.get("AI_REPS", "2"))          # 3 formulations x REPS = calls per test (~$0.012 each)
+AI_REPS  = int(os.environ.get("AI_REPS", "1"))          # 3 formulations x REPS calls/test — public teaser stays fast & under any worker timeout; deep reps happen in the paid engagement
 AI_DAILY_CAP = int(os.environ.get("AI_DAILY_CAP", "150"))  # worst-case ~$10/day, then falls back to lead capture
 AI_IP_HOURLY = int(os.environ.get("AI_IP_HOURLY", "2"))
 
@@ -75,13 +75,23 @@ def _ai_extract(text):
     return {}
 
 def _ai_ask(client, qtext, brand):
-    prompt = (f"{qtext}\n\nAfter answering, output ONLY a JSON object (nothing after it):\n"
-              f'{{"mentions_brand": true/false (did you recommend \\"{brand}\\"?),'
-              f'"winner": "<the #1 brand you steered the shopper to>","brand_price": "","competitors": ["..."]}}')
-    m = client.messages.create(model=AI_MODEL, max_tokens=1200, system=AI_SYS,
-                               messages=[{"role": "user", "content": prompt}])
-    text = "".join(b.text for b in m.content if getattr(b, "type", "") == "text")
-    d = _ai_extract(text); d["_answer"] = text[:600]; return d
+    # Force a structured tool call instead of parsing JSON out of prose — 100% reliable
+    # extraction (no truncation), and the tiny output keeps each call fast (~2-3s).
+    tool = {"name": "record_pick",
+            "description": "Record the brand you would genuinely recommend to this shopper.",
+            "input_schema": {"type": "object", "properties": {
+                "mentions_brand": {"type": "boolean", "description": f"Would you recommend {brand}?"},
+                "winner": {"type": "string", "description": "The single #1 brand you would steer this shopper to"},
+                "competitors": {"type": "array", "items": {"type": "string"}, "description": "Other brands you would name"}},
+                "required": ["mentions_brand", "winner"]}}
+    m = client.messages.create(model=AI_MODEL, max_tokens=400, system=AI_SYS, tools=[tool],
+                               tool_choice={"type": "tool", "name": "record_pick"},
+                               messages=[{"role": "user", "content": qtext + " Give your genuine pick."}])
+    d = {}
+    for b in m.content:
+        if getattr(b, "type", "") == "tool_use" and isinstance(getattr(b, "input", None), dict):
+            d = dict(b.input); break
+    d.setdefault("_answer", ""); return d
 
 def _ai_forms(brand, niche, rivals):
     cmp = " vs ".join([brand] + (rivals or [])[:2]) if rivals else brand
@@ -96,17 +106,16 @@ def run_ai_test(domain, niche, rivals=None):
     if not _ai_key(): return {"ok": False, "reason": "engine offline"}
     try:
         import anthropic
-        client = anthropic.Anthropic(api_key=_ai_key(), timeout=45.0, max_retries=1)
+        client = anthropic.Anthropic(api_key=_ai_key(), timeout=20.0, max_retries=1)
     except Exception as e:
         return {"ok": False, "reason": f"engine error: {type(e).__name__}"}
     brand = domain.split(".")[0].replace("-", " ").title()
     results = []
     for fk, prompt in _ai_forms(brand, niche, rivals):
-        omit = win = 0; winners = []; first = ""
+        omit = win = 0; winners = []
         for _ in range(AI_REPS):
             try: r = _ai_ask(client, prompt, brand)
             except Exception as e: r = {"_answer": f"[error {type(e).__name__}]"}
-            if not first: first = r.get("_answer", "")
             if r.get("mentions_brand") is False: omit += 1
             w = (r.get("winner") or "").strip()
             if w and not _selfm(w, brand): win += 1; winners.append(w)
@@ -163,7 +172,7 @@ def render_ai_result(res, domain, email):
             f"<h2 style='margin:.2em 0'>{dom}</h2><p style='font-size:1.05em'>{head}</p>"
             f"<table style='width:100%;border-collapse:collapse;font-size:.9em;margin-top:6px'>"
             f"<tr><th style='text-align:left;padding:7px'>How we asked</th><th style='text-align:left;padding:7px'>Result</th><th style='text-align:left;padding:7px'>Prompt (verify it)</th></tr>{rows}</table>"
-            f"<p style='font-size:.82em;color:#666;margin-top:8px'>Controlled test on {AI_MODEL} · reproduced {AI_REPS}×/phrasing · browsing off. Paste any prompt into ChatGPT or Claude to check.</p></div>"
+            f"<p style='font-size:.82em;color:#666;margin-top:8px'>Controlled test on {AI_MODEL} · asked 3 different ways (broad, use-case, head-to-head) · browsing off. Paste any prompt into ChatGPT or Claude to check.</p></div>"
             f"{fix}<p style='text-align:center'><a href='/'>← test another</a></p></div>")
     return body
 
@@ -756,13 +765,16 @@ def ai_test():
         return render_template_string(BASE_DOC, body="<div class='wrap'><div class='card cta' style='margin-top:50px'><h3>One more thing</h3><p>Domain, email, and what you sell are all required to run the live test.</p><a class='btn' href='/'>← Back</a></div></div>")
     try: log_lead(domain, "", email)   # capture the lead no matter what
     except Exception: pass
-    allowed, _why = _ai_allowed(ip)
-    if _ai_key() and allowed:
-        _ai_log_run(ip)
-        res = run_ai_test(domain, niche, rivals)
-        if res.get("ok"):
-            return render_template_string(BASE_DOC, body=render_ai_result(res, domain, email))
-    # fallback — no key / over cap / rate-limited: honest queue + lead captured
+    try:
+        allowed, _why = _ai_allowed(ip)
+        if _ai_key() and allowed:
+            _ai_log_run(ip)
+            res = run_ai_test(domain, niche, rivals)
+            if res.get("ok"):
+                return render_template_string(BASE_DOC, body=render_ai_result(res, domain, email))
+    except Exception:
+        import traceback, sys; traceback.print_exc(file=sys.stderr)  # -> Render logs, never a raw 500
+    # fallback — no key / over cap / rate-limited / error: honest queue + lead captured
     return render_template_string(BASE_DOC, body=(
         "<div class='wrap'><div class='card cta' style='margin-top:50px'><h3>You're queued ✓</h3>"
         "<p>We'll run the full AI-visibility test on <b>" + _html.escape(domain) + "</b> and email the results"
