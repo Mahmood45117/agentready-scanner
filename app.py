@@ -283,8 +283,9 @@ def render_ai_result(res, domain, email):
            f"<div class='card'><h3>How we fix it</h3><table style='width:100%;border-collapse:collapse;font-size:.9em'>{_ai_fix_rows(res.get('niche',''), res.get('competitor',''))}</table>"
            f"<p style='margin-top:10px'>Half up front — the other half only if the 30-day retest shows the number moved. No agency offers that.</p>"
            f"<a class='btn' href='mailto:mahmood@canaishopyou.com?subject=Fix%20plan%20for%20{dom}'>Get my fix plan →</a></div>")
+    api_eng = [e["engine"] for e in engines if e["engine"] in ("Claude", "ChatGPT")]
     notes = []
-    if any(e["engine"] in ("Claude", "ChatGPT") for e in engines): notes.append("ChatGPT &amp; Claude via API (no live browsing)")
+    if api_eng: notes.append(f"{' &amp; '.join(api_eng)} via API (no live browsing)")
     if any(e["engine"] == "Perplexity" for e in engines): notes.append("Perplexity is web-grounded")
     label = (f"Controlled test across <b>{_html.escape(elist)}</b>" + (" · one question per engine" if multi else " · asked 3 ways")
              + ". " + ("; ".join(notes) + ". " if notes else "") + "Paste any question below into the real thing to check.")
