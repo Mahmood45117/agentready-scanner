@@ -30,34 +30,25 @@ def _save(d):
         _json.dump(d, open(DATA_FILE, "w"))
     except Exception:
         pass
-def _email_lead(kind, domain, email, extra=""):
-    # Durable lead delivery: emails you the moment someone submits, so leads survive Render's
-    # ephemeral /tmp. Fully optional — if SMTP_* env vars aren't set, this no-ops silently.
-    host = os.environ.get("SMTP_HOST"); user = os.environ.get("SMTP_USER"); pw = os.environ.get("SMTP_PASS")
-    to = os.environ.get("LEAD_TO") or user
-    if not (host and user and pw and to): return
+def _notify_lead(kind, domain, email, extra=""):
+    # Instant lead alert via Telegram (HTTPS — works on Render, unlike SMTP which Render blocks).
+    # No-ops silently if TELEGRAM_TOKEN / TELEGRAM_CHAT_ID aren't set.
+    token = os.environ.get("TELEGRAM_TOKEN"); chat = os.environ.get("TELEGRAM_CHAT_ID")
+    if not (token and chat): return
     try:
-        import smtplib, ssl
-        from email.message import EmailMessage
-        port = int(os.environ.get("SMTP_PORT", "465"))
-        m = EmailMessage()
-        m["Subject"] = f"[CanAIShopYou] {kind} lead — {domain or email}"
-        m["From"] = user; m["To"] = to
-        if email: m["Reply-To"] = email
-        m.set_content(f"New {kind} lead\n\ndomain : {domain}\nemail  : {email}\n{extra}\n")
-        ctx = ssl.create_default_context()
-        if port == 465:
-            with smtplib.SMTP_SSL(host, port, context=ctx, timeout=12) as s:
-                s.login(user, pw); s.send_message(m)
-        else:
-            with smtplib.SMTP(host, port, timeout=12) as s:
-                s.ehlo(); s.starttls(context=ctx); s.login(user, pw); s.send_message(m)
+        text = (f"🛎️ New {kind} lead — canaishopyou\n"
+                f"domain: {domain}\n"
+                f"email: {email}\n"
+                f"{extra}").strip()
+        requests.post(f"https://api.telegram.org/bot{token}/sendMessage",
+                      json={"chat_id": chat, "text": text, "disable_web_page_preview": True},
+                      timeout=12)
     except Exception:
         import traceback, sys; traceback.print_exc(file=sys.stderr)   # log, never break the request
-def _email_lead_async(kind, domain, email, extra=""):
+def _notify_lead_async(kind, domain, email, extra=""):
     try:
         import threading
-        threading.Thread(target=_email_lead, args=(kind, domain, email, extra), daemon=True).start()
+        threading.Thread(target=_notify_lead, args=(kind, domain, email, extra), daemon=True).start()
     except Exception:
         pass
 def log_scan(domain, score, grade):
@@ -69,7 +60,7 @@ def log_lead(domain, score, email="", extra="", kind="scan"):
     d = _load()
     d["leads"].append({"domain": domain, "score": score, "email": email, "extra": extra, "kind": kind, "ts": _utcnow()})
     _save(d)
-    _email_lead_async(kind, domain, email, extra)
+    _notify_lead_async(kind, domain, email, extra)
 def scan_count():
     return BASELINE_SCANS + len(_load().get("scans", []))
 def recent_scans(n=5):
