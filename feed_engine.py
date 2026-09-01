@@ -30,10 +30,13 @@ def _txt(html, cap=5000):
 
 
 def _get(url, timeout=15, as_json=True):
-    r = requests.get(url, headers=UA, timeout=timeout, allow_redirects=True)
-    if r.status_code != 200:
-        return None
-    return r.json() if as_json else r.text
+    try:
+        r = requests.get(url, headers=UA, timeout=timeout, allow_redirects=True)
+        if r.status_code != 200:
+            return None
+        return r.json() if as_json else r.text
+    except Exception:
+        return None  # unreachable / not JSON — caller treats as "no catalog"
 
 
 def shopify_currency(domain):

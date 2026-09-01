@@ -876,23 +876,15 @@ Questions about these terms? <a href="mailto:mahmood@canaishopyou.com">mahmood@c
 
 app = Flask(__name__)
 
-@app.route("/", methods=["GET", "POST"])
+@app.route("/", methods=["GET"])
 def index():
-    r, domain = None, None
-    if request.method == "POST":
-        domain = request.form.get("domain", "")
-        r = scan(domain)
-        try: log_scan(r.get("domain",""), r.get("score",0), r.get("grade",""))
-        except Exception: pass
-        class O(dict): __getattr__ = dict.get
-        r = O(r)
-        ai = FINDINGS.get(r.get("domain", ""))
-    else:
-        ai = None
-    return render_template_string(PAGE, r=r, ai=ai, domain=domain, scans=scan_count(), recent=recent_scans())
+    # measurement era retired 1 Sep 2026 — the homepage is the connect funnel only
+    return render_template_string(PAGE, r=None, ai=None, domain=None, scans=scan_count(), recent=recent_scans())
 
-@app.route("/ai-test", methods=["POST"])
+@app.route("/ai-test", methods=["GET", "POST"])
 def ai_test():
+    return redirect("/", code=301)   # retired with the measurement pivot
+def _ai_test_retired():
     f = request.form
     domain = re.sub(r"^https?://", "", (f.get("domain", "")).strip().lower()).split("/")[0]
     email  = (f.get("email", "")).strip()
@@ -932,6 +924,14 @@ def connect():
     email = (f.get("email", "")).strip()
     if not (domain and email):
         return render_template_string(BASE_DOC, body="<div class='wrap'><div class='card cta' style='margin-top:50px'><h3>One more thing</h3><p>Store domain and email are both required.</p><a class='btn' href='/'>&larr; Back</a></div></div>")
+    ip = (request.headers.get("X-Forwarded-For", request.remote_addr or "")).split(",")[0].strip()
+    try:
+        d = _load(); now = _utcnow()
+        recent = [x for x in d.get("connect_runs", []) if x.get("ip") == ip and now - x["ts"] < 3600]
+        if len(recent) >= 3:
+            return render_template_string(BASE_DOC, body="<div class='wrap'><div class='card cta' style='margin-top:50px'><h3>One moment</h3><p>You've run a few checks this hour &mdash; email <a href='mailto:mahmood@canaishopyou.com' style='color:#fff'>mahmood@canaishopyou.com</a> and we'll take it from here.</p><a class='btn' href='/'>&larr; Back</a></div></div>")
+        d.setdefault("connect_runs", []).append({"ip": ip, "ts": now}); d["connect_runs"] = d["connect_runs"][-2000:]; _save(d)
+    except Exception: pass
     try: log_lead(domain, "", email, extra="", kind="connect")
     except Exception: pass
     rep = None
@@ -987,6 +987,14 @@ def serve_feed(fname):
         d = _load(); d.setdefault("feed_fetches", []).append({"f": fname, "ua": ua[:120], "ts": _utcnow()})
         d["feed_fetches"] = d["feed_fetches"][-2000:]; _save(d)
     except Exception: pass
+    try:  # keep hosted feeds fresh: regenerate in the background if older than 6h
+        import threading, time as _t
+        fpath = os.path.join(FEEDS_DIR, fname)
+        dom = fname.rsplit(".csv.gz", 1)[0].rsplit(".tsv", 1)[0]
+        if _fe and os.path.exists(fpath) and _t.time() - os.path.getmtime(fpath) > int(os.environ.get("FEED_MAX_AGE", 21600)):
+            os.utime(fpath, None)  # debounce concurrent fetches
+            threading.Thread(target=lambda: _fe.run(dom, outdir=FEEDS_DIR), daemon=True).start()
+    except Exception: pass
     return send_from_directory(FEEDS_DIR, fname)
 
 @app.route("/index-report")
@@ -1016,12 +1024,21 @@ def sitemap_xml():
 
 @app.route("/how-it-works")
 def index_report():
-    return render_template_string(INDEX_PAGE, rows=list(enumerate(INDEX_ED1, 1)), scans=scan_count())
+    body = ("<div class='card'><b>1 &middot; Connect your store</b><br><span style='color:var(--mut)'>Shopify stores connect instantly from the domain. WooCommerce, BigCommerce and custom stacks connect with read-only API keys &mdash; no code on your side.</span></div>"
+            "<div class='card'><b>2 &middot; We build and host your product feed</b><br><span style='color:var(--mut)'>Your catalog transformed to OpenAI's product-feed specification &mdash; every required field, checkout-eligibility flags, policy URLs &mdash; validated, hosted on our infrastructure and auto-refreshed so price and stock stay true.</span></div>"
+            "<div class='card'><b>3 &middot; We handle the merchant application</b><br><span style='color:var(--mut)'>Crawler access, policies, and your ChatGPT merchant application prepared and submitted. We document every requirement and tell you exactly where it stands.</span></div>"
+            "<div class='card'><b>4 &middot; Agent checkout</b><br><span style='color:var(--mut)'>Our hosted endpoint speaks the Agentic Commerce Protocol: ChatGPT completes the purchase, your payment account is charged, the order lands in your store. Rolling out to connected merchants.</span></div>"
+            "<div class='card cta'><h3>See your eligibility in a minute</h3><p>Enter your store on the homepage &mdash; we generate your actual feed on the spot.</p><a class='btn' href='/'>Connect my store &rarr;</a></div>")
+    return static_page("How it works", "How CanAIShopYou connects stores to ChatGPT Shopping: product feed, merchant application, agent checkout.",
+                       "How <em>it works</em>", "From locked-out store to AI-shoppable, in four steps.", body)
 
 @app.route("/about")
 def about_page():
-    return static_page("About", "Independent commerce intelligence for the age of AI search — how CanAIShopYou benchmarks AI discovery for DTC brands.",
-                       "About <em>CanAIShopYou</em>", "Independent commerce intelligence for the age of AI search.", ABOUT_BODY)
+    body = ("<div class='card'><b>What we do</b><br><span style='color:var(--mut)'>People now shop &mdash; and check out &mdash; inside AI assistants. That channel runs on product feeds and agent-checkout protocols. Shopify and Etsy stores were integrated automatically; every other store was left out. CanAIShopYou is the on-ramp: we build, host and run the layer that makes independent stores findable and buyable by AI.</span></div>"
+            "<div class='card'><b>Why it matters</b><br><span style='color:var(--mut)'>Which stores get to sell in the AI era shouldn't be decided by which platform they happened to build on. We exist so the non-Shopify half of commerce isn't locked out of the next channel.</span></div>"
+            "<div class='card'><b>Who</b><br><span style='color:var(--mut)'>Built by Mahmood &mdash; a solo founder working in public. Questions, stores, partnerships: <a href='mailto:mahmood@canaishopyou.com'>mahmood@canaishopyou.com</a></span></div>")
+    return static_page("About", "CanAIShopYou connects independent stores to AI shopping: product feeds, merchant onboarding and agent checkout.",
+                       "About <em>CanAIShopYou</em>", "The on-ramp to AI shopping for stores outside Shopify.", body)
 
 @app.route("/privacy")
 def privacy_page():
@@ -1035,6 +1052,8 @@ def terms_page():
 
 @app.route("/report/<path:domain>")
 def brand_report_page(domain):
+    return redirect("/", code=301)   # retired with the measurement pivot
+def _brand_report_retired(domain):
     domain = re.sub(r"^https?://", "", domain.strip().lower()).split("/")[0].replace("www.", "")
     r = brand_report(domain)
     if not r:
