@@ -761,7 +761,7 @@ PAGE = """<!doctype html><html><head><title>CanAIShopYou — Get your store into
 <p style="margin-top:12px;font-size:.85em;color:var(--dim)">or email <a href="mailto:mahmood@canaishopyou.com">mahmood@canaishopyou.com</a></p></div>
 {% endif %}
 <div class="foot">CanAIShopYou · the on-ramp to AI shopping — feeds, merchant onboarding &amp; agent checkout · Multan, Pakistan<br>
-<a href="/about">About</a> · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · <a href="/how-it-works">How it works</a> · <a href="mailto:mahmood@canaishopyou.com">mahmood@canaishopyou.com</a></div>
+<a href="/get-into-chatgpt-shopping">ChatGPT Shopping guide</a> · <a href="/openai-product-feed-spec">Feed spec</a> · <a href="/agentic-commerce-non-shopify">ACP guide</a> · <a href="/about">About</a> · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · <a href="/how-it-works">How it works</a> · <a href="mailto:mahmood@canaishopyou.com">mahmood@canaishopyou.com</a></div>
 </div></body></html>"""
 
 INDEX_PAGE = """<!doctype html><html><head><title>Independent AI-Commerce Testing | CanAIShopYou</title>
@@ -783,9 +783,10 @@ INDEX_PAGE = """<!doctype html><html><head><title>Independent AI-Commerce Testin
 <a href="mailto:mahmood@canaishopyou.com">mahmood@canaishopyou.com</a></div>
 </div></body></html>"""
 
-FOOT = ('<div class="foot">CanAIShopYou · independent AI-commerce testing · Multan, Pakistan<br>'
-        '<a href="/about">About</a> · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · '
-        '<a href="mailto:mahmood@canaishopyou.com">mahmood@canaishopyou.com</a></div>')
+FOOT = ('<div class="foot">CanAIShopYou · the on-ramp to AI shopping · Multan, Pakistan<br>'
+        '<a href="/get-into-chatgpt-shopping">ChatGPT Shopping guide</a> · <a href="/openai-product-feed-spec">Feed spec</a> · '
+        '<a href="/agentic-commerce-non-shopify">ACP guide</a> · <a href="/about">About</a> · <a href="/privacy">Privacy</a> · '
+        '<a href="/terms">Terms</a> · <a href="mailto:mahmood@canaishopyou.com">mahmood@canaishopyou.com</a></div>')
 
 def static_page(title, desc, hero_h1, hero_sub, body):
     """A plain, INDEXABLE trust page (About/Privacy/Terms) in the site's own design system.
@@ -1016,11 +1017,74 @@ def robots_txt():
 
 @app.route("/sitemap.xml")
 def sitemap_xml():
-    pages = ["", "how-it-works", "about", "privacy", "terms"]
+    pages = ["", "how-it-works", "about", "privacy", "terms",
+             "get-into-chatgpt-shopping", "openai-product-feed-spec", "agentic-commerce-non-shopify"]
     urls = "".join(f"<url><loc>https://canaishopyou.com/{p}</loc></url>" for p in pages)
     return Response('<?xml version="1.0" encoding="UTF-8"?>'
                     '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
                     + urls + "</urlset>", mimetype="application/xml")
+
+
+_CONNECT_CTA = ('<div class="card cta"><h3>See exactly what blocks your store — free</h3>'
+                '<p>Enter your store on the homepage and we generate your actual OpenAI-spec feed on the spot, '
+                'with a line-by-line readout of what blocks search and checkout eligibility.</p>'
+                '<a class="btn" href="/">Check my store &rarr;</a></div>')
+
+@app.route("/get-into-chatgpt-shopping")
+def guide_chatgpt_shopping():
+    body = (
+        '<div class="card"><p style="font-size:1.05em">People now browse and buy inside ChatGPT. <b>Shopify and Etsy stores were added to ChatGPT Shopping automatically.</b> '
+        'If your store runs on WooCommerce, BigCommerce, Magento or a custom stack, you are not in the pipeline &mdash; and you will not appear when shoppers ask ChatGPT what to buy. '
+        'Getting in is a defined, four-part process. Here is the whole thing, with nothing held back.</p></div>'
+        '<div class="card"><b>1 &middot; A spec-compliant product feed</b><br><span style="color:var(--mut)">OpenAI ingests a structured file of your entire catalog &mdash; UTF-8 delimited (.csv / .tsv, gzip accepted), one variant per row, lowercase underscore headers. '
+        'Required for every product: <code>item_id</code>, <code>title</code> (&le;150 chars), <code>description</code> (plain text, &le;5,000), <code>url</code>, <code>image_url</code>, <code>brand</code>, <code>price</code> with ISO currency (&ldquo;29.00 USD&rdquo;), and <code>availability</code>. '
+        'Plus three control flags: <code>is_eligible_search</code>, <code>is_eligible_checkout</code>, <code>is_ads_eligible</code>. Identifiers (GTIN/MPN) are expected unless you declare <code>identifier_exists=no</code>. '
+        'The feed is your single source of truth &mdash; stale prices or stock get you buried.</span></div>'
+        '<div class="card"><b>2 &middot; Crawler access</b><br><span style="color:var(--mut)">OpenAI&rsquo;s shopping crawler is <code>OAI-SearchBot</code>. Your robots.txt must not block it, your product pages must return HTTP 200 to it, and a sitemap helps. '
+        'Many stores block AI bots with a blanket rule and lock themselves out without knowing.</span></div>'
+        '<div class="card"><b>3 &middot; The merchant application</b><br><span style="color:var(--mut)">Unless you sell on Shopify or Etsy, you apply at <b>chatgpt.com/merchants</b>: company, website, catalog size in unique SKUs. '
+        'OpenAI onboards on a rolling basis; a self-serve portal has been promised but is not here yet &mdash; which means early applicants are reviewed by humans. Policy pages (privacy, terms, returns, shipping) need to be live and real.</span></div>'
+        '<div class="card"><b>4 &middot; Checkout eligibility (optional but powerful)</b><br><span style="color:var(--mut)">For in-chat purchases (&ldquo;Instant Checkout&rdquo;), your feed rows must set <code>is_eligible_checkout=true</code> with live <code>seller_privacy_policy</code> and <code>seller_tos</code> URLs, '
+        'and your store must implement the Agentic Commerce Protocol with delegated payments through a supported PSP (Stripe). Without it you can still be listed and clicked through to your own checkout.</span></div>'
+        + _CONNECT_CTA)
+    return static_page("Get into ChatGPT Shopping",
+        "How non-Shopify stores get into ChatGPT Shopping in 2026: the product feed spec, OAI-SearchBot crawler access, the merchant application, and agent checkout.",
+        "How to get your store into <em>ChatGPT Shopping</em>",
+        "Shopify stores were added automatically. Here is the exact process for everyone else.", body)
+
+@app.route("/openai-product-feed-spec")
+def guide_feed_spec():
+    body = (
+        '<div class="card"><p style="font-size:1.05em">The product feed is the core artifact of ChatGPT Shopping &mdash; the file OpenAI reads to know your products, prices and stock. Here is the specification in practical form.</p></div>'
+        '<div class="card"><b>File format</b><br><span style="color:var(--mut)">UTF-8 delimited text: .csv, .tsv or .txt, plus gzip variants (.csv.gz recommended). One header row, lowercase_underscore field names, one product variant per row.</span></div>'
+        '<div class="card"><b>Required fields, every row</b><br><span style="color:var(--mut)"><code>item_id</code> (stable, &le;100 chars) &middot; <code>title</code> (&le;150, plain text) &middot; <code>description</code> (&le;5,000, plain text, no HTML) &middot; '
+        '<code>url</code> (must resolve 200) &middot; <code>image_url</code> (JPEG/PNG) &middot; <code>brand</code> (&le;70) &middot; <code>price</code> as &ldquo;amount CURRENCY&rdquo; &middot; <code>availability</code> (in_stock / out_of_stock / pre_order / backorder).</span></div>'
+        '<div class="card"><b>The three control flags</b><br><span style="color:var(--mut)"><code>is_eligible_search</code> &mdash; appear in ChatGPT answers. <code>is_eligible_checkout</code> &mdash; purchasable in-chat (requires search=true plus live <code>seller_privacy_policy</code> and <code>seller_tos</code> URLs). <code>is_ads_eligible</code> &mdash; ads processing.</span></div>'
+        '<div class="card"><b>What actually trips stores up</b><br><span style="color:var(--mut)">Variants not expanded to their own rows with <code>group_id</code> + <code>variant_dict</code> &middot; HTML left inside descriptions &middot; prices without a currency code &middot; missing GTIN/MPN without <code>identifier_exists=no</code> &middot; '
+        'sale prices not lower than list price &middot; policy URLs that 404. Any of these can silently cost you eligibility.</span></div>'
+        '<div class="card"><b>Freshness</b><br><span style="color:var(--mut)">The feed should refresh continuously &mdash; OpenAI treats it as the source of truth for price and stock. A static export goes stale in days; hosted auto-refresh is the standard we run for connected stores.</span></div>'
+        + _CONNECT_CTA)
+    return static_page("OpenAI Product Feed Spec",
+        "The OpenAI product feed specification explained for merchants: file formats, required fields, control flags, checkout eligibility, and the mistakes that cost listings.",
+        "The OpenAI <em>product feed spec</em>, explained",
+        "Every required field, the control flags, and the mistakes that quietly cost you eligibility.", body)
+
+@app.route("/agentic-commerce-non-shopify")
+def guide_acp():
+    body = (
+        '<div class="card"><p style="font-size:1.05em">The Agentic Commerce Protocol (ACP) &mdash; developed by OpenAI with Stripe &mdash; is how an AI assistant completes a purchase on a merchant&rsquo;s behalf. '
+        'Shopify implemented it once for all its merchants. Everyone else has to bring their own implementation. This is what that involves.</p></div>'
+        '<div class="card"><b>What happens when a shopper taps Buy in ChatGPT</b><br><span style="color:var(--mut)">ChatGPT calls the merchant&rsquo;s checkout API directly: a session is created with line items and address, totals and shipping are computed, '
+        'the buyer confirms, and OpenAI passes a <b>delegated payment token</b> (Stripe) that the merchant&rsquo;s side charges. The order then lands in the store&rsquo;s own system and status flows back by webhook. The card number never touches the merchant.</span></div>'
+        '<div class="card"><b>What a non-Shopify store needs</b><br><span style="color:var(--mut)">(1) a spec-compliant product feed with <code>is_eligible_checkout=true</code>; (2) live privacy and terms URLs; (3) an ACP checkout endpoint &mdash; sessions, totals, tax and shipping, idempotency, refunds, webhooks; '
+        '(4) delegated payments via a supported PSP (Stripe today); (5) an approved merchant application. Items 3&ndash;4 are real engineering &mdash; this is the part WooCommerce and custom stores cannot click a button for.</span></div>'
+        '<div class="card"><b>The practical path</b><br><span style="color:var(--mut)">Start with search eligibility (feed + crawler + application) &mdash; that alone puts your products in front of ChatGPT shoppers with click-through to your own checkout. '
+        'Add ACP checkout when the channel proves itself for your catalog. That is the order we run stores through.</span></div>'
+        + _CONNECT_CTA)
+    return static_page("Agentic Commerce for Non-Shopify Stores",
+        "How the Agentic Commerce Protocol (ACP) works and what WooCommerce and custom stores need for ChatGPT Instant Checkout: feed, policies, checkout API, delegated payments.",
+        "Agentic commerce for <em>non-Shopify</em> stores",
+        "How AI agents complete purchases, and exactly what your stack is missing.", body)
 
 @app.route("/how-it-works")
 def index_report():
