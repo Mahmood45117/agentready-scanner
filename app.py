@@ -665,18 +665,18 @@ td a:hover{color:var(--accent);border-bottom-color:var(--accent)}
 """
 
 NAV = """<div class="wrap"><div class="nav"><a class="brand" href="/">🔍 Can<span>AI</span>ShopYou</a>
-<span class="links"><a href="/">Scanner</a><a href="/how-it-works">How it works</a><a href="/about">About</a><a href="mailto:mahmood@canaishopyou.com">Contact</a></span></div>"""
+<span class="links"><a href="/">Connect</a><a href="/how-it-works">How it works</a><a href="/about">About</a><a href="mailto:mahmood@canaishopyou.com">Contact</a></span></div>"""
 
-PAGE = """<!doctype html><html><head><title>CanAIShopYou — Does AI recommend your store, or a competitor?</title>
+PAGE = """<!doctype html><html><head><title>CanAIShopYou — Get your store into AI shopping</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta property="og:title" content="Does AI recommend your store — or a competitor?">
-<meta property="og:description" content="When shoppers ask an AI what to buy, does it name your brand or a rival? We run the real questions your customers ask and show you, with reproduced evidence.">
-<meta name="description" content="Shoppers now ask AI what to buy. CanAIShopYou tests whether AI assistants recommend your store, rank a competitor above you, or get your facts wrong — reproduced and documented.">
+<meta property="og:title" content="Get your store into AI shopping — feed, application, agent checkout">
+<meta property="og:description" content="Shopify stores got into ChatGPT Shopping automatically. We get everyone else in: spec-compliant product feeds, merchant application, and agent-ready checkout.">
+<meta name="description" content="People now buy inside ChatGPT. CanAIShopYou plugs stores into AI shopping: we build and host your OpenAI product feed, handle your merchant application, and run agent checkout.">
 <meta name="google-site-verification" content="W_rODKils0f-T6_EvgJ2IX1lK8MGErJIpzL1aIey4L4" />
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"Organization","name":"CanAIShopYou",
 "url":"https://canaishopyou.com","email":"mahmood@canaishopyou.com",
-"description":"Independent commerce intelligence for the age of AI search — testing whether AI assistants recommend a store or its competitors, with reproduced, documented findings shared privately with each merchant.",
+"description":"The on-ramp to AI shopping: product feeds, merchant onboarding and agent checkout that connect online stores to ChatGPT Shopping and AI agents.",
 "founder":{"@type":"Person","name":"Mahmood"},
 "address":{"@type":"PostalAddress","addressLocality":"Multan","addressCountry":"PK"},
 "knowsAbout":["AI search visibility","generative engine optimization","AI commerce testing"],
@@ -685,35 +685,39 @@ PAGE = """<!doctype html><html><head><title>CanAIShopYou — Does AI recommend y
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔍</text></svg>">
 <style>""" + BASE_CSS + """</style></head><body>
 """ + NAV + """
-<div class="hero"><h1>Shoppers ask AI what to buy.<br><em>Does it recommend you — or your competitor?</em></h1>
-<p>Millions now ask ChatGPT, Claude and Perplexity what to buy before they ever reach your site. We run the exact questions your customers ask and show you — with reproduced evidence — whether AI names your brand, ranks a rival above you, or gets your price wrong.</p>
+<div class="hero"><h1>People are buying inside ChatGPT.<br><em>We plug your store into that channel.</em></h1>
+<p>AI shopping runs on two things your store probably doesn't have: a spec-compliant product feed and an agent-ready checkout. Shopify and Etsy stores were wired in automatically &mdash; everyone else was left out. We build, host and run that layer for you, so AI assistants can find your products <b>and complete the purchase</b>.</p>
 <div class="statrow">
-<div class="stat"><b>+1,200%</b><span>AI-referred retail traffic since '24 (Adobe)</span></div>
-<div class="stat"><b>Reproduced 3&times;</b><span>every finding, multiple runs</span></div>
-<div class="stat"><b>Private</b><span>findings shared only with you</span></div>
+<div class="stat"><b>Live now</b><span>shoppers check out in-chat on ChatGPT</span></div>
+<div class="stat"><b>Feed + checkout</b><span>the two things the channel requires</span></div>
+<div class="stat"><b>~60 seconds</b><span>to see your store's real eligibility</span></div>
 </div>
-<form class="scan" method="post"><input name="domain" placeholder="yourstore.com" value="{{domain or ''}}" required>
-<button>Free scan</button></form>
-<div class="engines"><span class="lbl">We test across the assistants your customers use</span><b>ChatGPT</b><b>Claude</b><b>Perplexity</b><b>Gemini</b><b>Copilot</b></div></div>
+<form class="scan" method="post" action="/connect" style="max-width:640px;flex-wrap:wrap">
+<input name="domain" placeholder="yourstore.com" value="{{domain or ''}}" required>
+<input name="email" type="email" placeholder="you@yourstore.com" required>
+<button>Connect my store &rarr;</button></form>
+<p style="margin-top:10px;font-size:.82em;color:var(--dim)">Free eligibility check &mdash; we generate your actual feed on the spot and show exactly what blocks you.</p>
+<div class="engines"><span class="lbl">The surfaces we plug you into</span><b>ChatGPT Shopping</b><b>Instant Checkout</b><b>Perplexity Merchants</b><b>MCP agents</b></div></div>
 {% if not r %}
 <div class="card" style="border-left:3px solid var(--accent)">
-<div style="font-size:.72em;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--accent)">A real finding &mdash; brand name withheld</div>
-<p style="margin:10px 0 6px;font-size:1.08em;line-height:1.55;color:var(--ink)">In a controlled <b>Claude</b> test we asked the exact question a shopper types &mdash; <i>&ldquo;best fresh dog food brands&rdquo;</i>. one of the category's best-known DTC challenger brands was <b>out-ranked by its top competitor in 3 of 3 runs</b>, and dropped from the list entirely when we asked as a first-time buyer.</p>
-<p style="margin:0;color:var(--mut);font-size:.95em">The brand had no idea. We reproduce every finding, document the exact prompts, and send them privately &mdash; we never publish findings about a named store. <b>This is what we test on yours &mdash; and your result is shared only with you.</b></p>
+<div style="font-size:.72em;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--accent)">Why now</div>
+<p style="margin:10px 0 6px;font-size:1.08em;line-height:1.55;color:var(--ink)">OpenAI opened ChatGPT Shopping and in-chat checkout to merchants. <b>Shopify and Etsy sellers were integrated automatically.</b> Everyone else needs a spec-compliant product feed, crawler access, an approved merchant application &mdash; and, for in-chat purchases, the Agentic Commerce Protocol with delegated payments.</p>
+<p style="margin:0;color:var(--mut);font-size:.95em">There's no self-serve portal yet. That gap &mdash; between stores that got the channel for free and stores locked out of it &mdash; is exactly the work we do.</p>
 </div>
 <div class="steps">
-<div class="step"><span class="n">STEP 1</span><h4>🔍 Free readability scan</h4><p>Can AI even read your store? Structured data, crawler access, the machine layer AI depends on. Free, 30 seconds &mdash; no signup.</p></div>
-<div class="step"><span class="n">STEP 2</span><h4>🤖 The AI visibility audit</h4><p>We ask the real questions your customers ask an AI and record what it says: does it recommend you, rank a competitor above you, or misstate your price? Every finding reproduced across multiple runs.</p></div>
-<div class="step"><span class="n">STEP 3</span><h4>📈 Know exactly where you stand</h4><p>A clear teardown of where you're recommended, where you're invisible, and which competitor is winning the answer &mdash; with the exact prompts so your team can reproduce and act on it.</p></div>
+<div class="step"><span class="n">STEP 1</span><h4>🔌 Connect your store</h4><p>Shopify connects instantly from your domain. WooCommerce, BigCommerce and custom stacks connect with read-only API keys. No code on your side.</p></div>
+<div class="step"><span class="n">STEP 2</span><h4>📦 We build &amp; host your feed</h4><p>Your catalog, transformed to OpenAI's exact product-feed spec &mdash; validated, hosted on our infrastructure, auto-refreshed so price and stock stay true.</p></div>
+<div class="step"><span class="n">STEP 3</span><h4>📨 We handle the application</h4><p>Crawler access, policy URLs, checkout-eligibility fields, and your ChatGPT merchant application &mdash; prepared and submitted for you.</p></div>
+<div class="step"><span class="n">STEP 4</span><h4>🛒 Agent checkout</h4><p>Our hosted checkout endpoint speaks the Agentic Commerce Protocol to ChatGPT, charges your Stripe, and drops the order into your store. Rolling out to connected merchants.</p></div>
 </div>
 <div class="price">
-<div class="tier"><b>Free</b><div class="per">instant readability scan</div><ul><li>5 automated checks</li><li>Scored report card</li><li>No signup</li></ul></div>
-<div class="tier"><b>Diagnostic</b><div class="per">reproduced findings · 5 days</div><ul><li>The competitors AI names instead of you</li><li>Every finding reproduced across multiple runs</li><li>The exact prompts, so you can verify it yourself</li></ul></div>
-<div class="tier"><b>Pilot</b><div class="per">diagnosis · fix · measured retest</div><ul><li>A prioritised, evidence-graded fix list</li><li>We implement or spec the fix</li><li>30-day retest — measured, not claimed</li></ul></div>
+<div class="tier"><b>Free</b><div class="per">eligibility check</div><ul><li>Your real feed generated on the spot</li><li>Exactly what blocks search &amp; checkout</li><li>No signup, no code</li></ul></div>
+<div class="tier"><b>Launch</b><div class="per">into the pipeline</div><ul><li>Feed built, validated &amp; hosted</li><li>Auto-refresh + crawler access</li><li>Merchant application handled</li></ul></div>
+<div class="tier"><b>Infrastructure</b><div class="per">monthly + % of agent sales</div><ul><li>Always-on feed hosting &amp; monitoring</li><li>Agent checkout endpoint (ACP + Stripe)</li><li>You earn from the channel &mdash; so do we</li></ul></div>
 </div>
-<div class="card cta"><h3>Independent &middot; reproduced &middot; private</h3>
-<p>We run the questions your customers ask an AI, reproduce every result across multiple runs, and show you exactly where you're recommended or invisible &mdash; privately, with the prompts to reproduce it. We never publish findings about a named brand.</p>
-<a class="btn" href="/how-it-works">How it works &rarr;</a></div>
+<div class="card cta"><h3>Your Shopify competitors are already in.</h3>
+<p>The AI shopping channel is open now and the tooling gap won't last. Connect your store, see your eligibility in a minute, and get in while it's early.</p>
+<a class="btn" href="mailto:mahmood@canaishopyou.com?subject=Connect%20my%20store">Talk to us &rarr;</a></div>
 {% endif %}
 {% if r %}
 <div class="card" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap"><span class="score c{{r.grade}}">{{r.score}}<span class="outof">/100</span></span> <span class="pill p{{r.grade}}" style="font-size:1em;padding:6px 16px">GRADE {{r.grade}}</span> <span class="dom">{{r.domain}}</span></div>
@@ -756,7 +760,7 @@ PAGE = """<!doctype html><html><head><title>CanAIShopYou — Does AI recommend y
 {% endif %}
 <p style="margin-top:12px;font-size:.85em;color:var(--dim)">or email <a href="mailto:mahmood@canaishopyou.com">mahmood@canaishopyou.com</a></p></div>
 {% endif %}
-<div class="foot">CanAIShopYou · independent AI-commerce testing &amp; the Agent-Ready Index · Multan, Pakistan<br>
+<div class="foot">CanAIShopYou · the on-ramp to AI shopping — feeds, merchant onboarding &amp; agent checkout · Multan, Pakistan<br>
 <a href="/about">About</a> · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · <a href="/how-it-works">How it works</a> · <a href="mailto:mahmood@canaishopyou.com">mahmood@canaishopyou.com</a></div>
 </div></body></html>"""
 
@@ -914,6 +918,76 @@ def ai_test():
         "<p>We'll run the full AI-visibility test on <b>" + _html.escape(domain) + "</b> and email the results"
         + ((" to <b>" + _html.escape(email) + "</b>") if email else "") + " within a day — with the exact prompts so you can verify every line.</p>"
         "<a class='btn' href='/'>← Back</a></div></div>"))
+
+try:
+    import feed_engine as _fe
+except Exception:
+    _fe = None
+FEEDS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "feeds")
+
+@app.route("/connect", methods=["POST"])
+def connect():
+    f = request.form
+    domain = re.sub(r"^https?://", "", (f.get("domain", "")).strip().lower()).split("/")[0]
+    email = (f.get("email", "")).strip()
+    if not (domain and email):
+        return render_template_string(BASE_DOC, body="<div class='wrap'><div class='card cta' style='margin-top:50px'><h3>One more thing</h3><p>Store domain and email are both required.</p><a class='btn' href='/'>&larr; Back</a></div></div>")
+    try: log_lead(domain, "", email, extra="", kind="connect")
+    except Exception: pass
+    rep = None
+    if _fe:
+        try: rep = _fe.run(domain, outdir=FEEDS_DIR)
+        except Exception:
+            import traceback, sys as _s; traceback.print_exc(file=_s.stderr)
+    if not rep or not rep.get("ok"):
+        reason = (rep or {}).get("reason", "we couldn't read a public catalog on this domain")
+        body = ("<div class='wrap'><div class='card' style='margin-top:44px'><h2 style='margin:0 0 8px'>" + _html.escape(domain) + "</h2>"
+                "<p style='color:var(--mut)'>No public catalog found &mdash; " + _html.escape(reason) + ".</p>"
+                "<p>That usually means the store runs on <b>WooCommerce, BigCommerce or a custom stack</b> &mdash; exactly who we built this for. "
+                "Connecting takes one step: your platform's read-only API keys, and we generate the feed from those.</p></div>"
+                "<div class='card cta'><h3>We'll connect it with you</h3><p>Reply with your platform (Woo / BigCommerce / custom) and we'll onboard your catalog directly &mdash; you're in the queue as " + _html.escape(email) + ".</p>"
+                "<a class='btn' href='mailto:mahmood@canaishopyou.com?subject=Connect%20" + _html.escape(domain) + "'>Connect my store &rarr;</a></div>"
+                "<p style='text-align:center'><a href='/'>&larr; back</a></p></div>")
+        return render_template_string(BASE_DOC, body=body)
+    q = rep.get("data_quality", {})
+    blockers = rep.get("checkout_blockers", [])
+    fb = f"https://canaishopyou.com/feeds/{rep['domain']}.csv.gz"
+    ck_ok = rep.get("checkout_eligible")
+    rows = "".join(
+        f"<tr><td style='padding:8px;border-bottom:1px solid var(--hair)'><b>{k}</b></td><td style='padding:8px;border-bottom:1px solid var(--hair)'>{v}</td></tr>"
+        for k, v in [
+            ("Platform", rep.get("platform", "?").title()),
+            ("Products found", rep.get("products")),
+            ("Feed rows generated", rep.get("feed_rows")),
+            ("Currency", rep.get("currency") + ("" if rep.get("currency_detected") else " (assumed)")),
+            ("Search eligibility", "<span class='PASS'>READY</span>"),
+            ("Checkout eligibility", "<span class='PASS'>READY</span>" if ck_ok else "<span class='WARN'>BLOCKED</span> missing: " + ", ".join(blockers)),
+            ("Items missing GTIN/SKU", q.get("no_identifier", 0)),
+            ("Items missing images", q.get("no_image", 0)),
+        ])
+    body = ("<div class='wrap'><div class='card' style='margin-top:44px'>"
+            "<div style='color:#0a7d3c;font-weight:700;font-size:12px'>YOUR FEED IS BUILT &middot; LIVE</div>"
+            f"<h2 style='margin:.2em 0'>{_html.escape(rep['domain'])}</h2>"
+            f"<p style='font-size:1.05em'>We just generated your <b>submission-ready OpenAI product feed</b> &mdash; {rep.get('feed_rows')} items, to spec, hosted and auto-refreshing:</p>"
+            f"<p><code style='font-size:.9em'>{fb}</code></p>"
+            f"<table style='width:100%;border-collapse:collapse;font-size:.92em'>{rows}</table></div>"
+            "<div class='card cta'><h3>Next: we put it to work</h3>"
+            "<p>Feed hosting + auto-refresh, crawler access, your ChatGPT merchant application handled &mdash; and agent checkout when your approval lands. That's the service.</p>"
+            f"<a class='btn' href='mailto:mahmood@canaishopyou.com?subject=Launch%20{_html.escape(rep['domain'])}%20into%20AI%20shopping'>Launch my store &rarr;</a></div>"
+            "<p style='text-align:center'><a href='/'>&larr; back</a></p></div>")
+    return render_template_string(BASE_DOC, body=body)
+
+@app.route("/feeds/<path:fname>")
+def serve_feed(fname):
+    from flask import send_from_directory, abort
+    if not re.match(r"^[a-z0-9.-]+\.(tsv|csv\.gz)$", fname):
+        abort(404)
+    ua = request.headers.get("User-Agent", "")
+    try:
+        d = _load(); d.setdefault("feed_fetches", []).append({"f": fname, "ua": ua[:120], "ts": _utcnow()})
+        d["feed_fetches"] = d["feed_fetches"][-2000:]; _save(d)
+    except Exception: pass
+    return send_from_directory(FEEDS_DIR, fname)
 
 @app.route("/index-report")
 def index_report_legacy():
