@@ -279,10 +279,22 @@ class Woo:
                           {"key": "stripe_payment_intent", "value": pi_id},
                           {"key": "_acp_gateway", "value": "canaishopyou"}],
         }
+        # two steps on purpose: create as pending, then flip to processing, so the store's
+        # "status -> processing" hooks fire (fulfilment integrations like Printify listen on that transition)
+        body.update({"status": "pending", "set_paid": False})
         r = requests.post(f"{self.base}/wp-json/wc/v3/orders", json=body, auth=auth, headers=UA, timeout=30)
         if r.status_code not in (200, 201):
             raise RuntimeError(f"woo order create failed {r.status_code}: {r.text[:300]}")
-        return r.json()
+        o = r.json()
+        r2 = requests.put(f"{self.base}/wp-json/wc/v3/orders/{o['id']}", json={"status": "processing", "set_paid": True,
+                          "transaction_id": pi_id}, auth=auth, headers=UA, timeout=30)
+        # Woo delivers webhooks (e.g. to Printify) via Action Scheduler on WP-Cron, which only runs on page traffic —
+        # observed ~1h delay on a quiet store. Poke cron so fulfilment hears about the order now (best effort).
+        try:
+            requests.get(f"{self.base}/wp-cron.php?doing_wp_cron", headers=UA, timeout=10)
+        except Exception:
+            pass
+        return r2.json() if r2.status_code == 200 else o
 
     def find_order_by_session(self, session_id):
         auth = (self.m["woo_ck"], self.m["woo_cs"])
