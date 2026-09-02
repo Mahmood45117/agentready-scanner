@@ -6,6 +6,7 @@
   "feed_rows": 32,
   "files": {
     "tsv": "feeds/linealprints.com.tsv",
+    "tsv_gz": "feeds/linealprints.com.tsv.gz",
     "csv_gz": "feeds/linealprints.com.csv.gz"
   },
   "currency": "USD",
@@ -17,6 +18,39 @@
     "no_identifier": 0,
     "no_image": 0,
     "no_description": 0,
-    "truncated_title": 0
-  }
+    "truncated_title": 0,
+    "short_description": 0
+  },
+  "spec": {
+    "errors": [],
+    "error_count": 0,
+    "warnings": [],
+    "warning_count": 0,
+    "recommended_completeness_pct": 89,
+    "per_field_pct": {
+      "gtin": 0,
+      "mpn": 100,
+      "product_category": 100,
+      "material": 100,
+      "color": 100,
+      "condition": 100,
+      "length": 100,
+      "weight": 100,
+      "additional_image_urls": 100,
+      "group_id": 100,
+      "variant_dict": 100,
+      "shipping": 100,
+      "accepts_returns": 100,
+      "return_policy": 100,
+      "review_count": 0,
+      "q_and_a": 100,
+      "related_product_id": 100,
+      "seller_url": 100
+    },
+    "recommended_missing": [
+      "gtin",
+      "review_count"
+    ]
+  },
+  "profile_applied": true
 }
