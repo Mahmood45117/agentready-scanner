@@ -8,7 +8,8 @@
     "tsv": "feeds/linealprints.com.tsv",
     "tsv_gz": "feeds/linealprints.com.tsv.gz",
     "csv_gz": "feeds/linealprints.com.csv.gz",
-    "google_tsv": "feeds/linealprints.com.google.tsv"
+    "google_tsv": "feeds/linealprints.com.google.tsv",
+    "shopify_csv": "feeds/linealprints.com.shopify.csv"
   },
   "currency": "USD",
   "currency_detected": true,

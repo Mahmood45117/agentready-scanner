@@ -1105,7 +1105,7 @@ def thanks():
 @app.route("/feeds/<path:fname>")
 def serve_feed(fname):
     from flask import send_from_directory, abort
-    if not re.match(r"^[a-z0-9.-]+\.(tsv|tsv\.gz|csv\.gz|google\.tsv)$", fname):
+    if not re.match(r"^[a-z0-9.-]+\.(tsv|tsv\.gz|csv\.gz|google\.tsv|shopify\.csv)$", fname):
         abort(404)
     ua = request.headers.get("User-Agent", "")
     try:

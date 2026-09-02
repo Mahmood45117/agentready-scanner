@@ -503,6 +503,81 @@ def write_google_feed(domain, rows, outdir="feeds"):
     return path
 
 
+SHOPIFY_FIELDS = ["Handle", "Title", "Body (HTML)", "Vendor", "Product Category", "Type", "Tags", "Published",
+                  "Option1 Name", "Option1 Value", "Option2 Name", "Option2 Value", "Option3 Name", "Option3 Value",
+                  "Variant SKU", "Variant Grams", "Variant Inventory Policy", "Variant Fulfillment Service",
+                  "Variant Price", "Variant Compare At Price", "Variant Requires Shipping", "Variant Taxable",
+                  "Variant Barcode", "Image Src", "Image Position", "Image Alt Text", "SEO Title", "SEO Description",
+                  "Variant Weight Unit", "Status"]
+
+
+def write_shopify_csv(domain, rows, outdir="feeds"):
+    """Shopify product-import CSV built from the spec rows — for the free Shopify Agentic plan, which puts a
+    non-Shopify store's catalog into ChatGPT via Shopify Catalog (checkout stays on the merchant's own site).
+    Grouped by group_id; first row of each product carries body/vendor/images, later rows only variant columns."""
+    groups = {}
+    for r in rows:
+        groups.setdefault(r.get("group_id") or r["item_id"], []).append(r)
+    out = []
+    for gid, vs in groups.items():
+        first = vs[0]
+        handle = re.sub(r"[^a-z0-9]+", "-", (first.get("item_group_title") or first["title"]).lower()).strip("-")[:100]
+        body = "<p>" + first["description"].replace("\n", " ") + "</p>"
+        imgs = [first["image_url"]] + [u for u in (first.get("additional_image_urls") or "").split(",") if u]
+        opt_names = []
+        try:
+            opt_names = list(json.loads(first["variant_dict"]).keys()) if first.get("variant_dict") else []
+        except Exception:
+            pass
+        for i, r in enumerate(vs):
+            vd = {}
+            try:
+                vd = json.loads(r["variant_dict"]) if r.get("variant_dict") else {}
+            except Exception:
+                pass
+            grams = ""
+            if r.get("weight"):
+                try:
+                    grams = str(int(round(float(r["weight"]) * (453.592 if r.get("item_weight_unit", "lb").startswith("lb") else 1000))))
+                except ValueError:
+                    pass
+            price = r["price"].split()[0]; sale = r.get("sale_price", "").split()[0] if r.get("sale_price") else ""
+            row = {
+                "Handle": handle, "Title": (first.get("item_group_title") or first["title"]) if i == 0 else "",
+                "Body (HTML)": body if i == 0 else "", "Vendor": first["brand"] if i == 0 else "",
+                "Product Category": first.get("product_category", "") if i == 0 else "",
+                "Type": (first.get("product_category", "").split(">")[-1].strip()) if i == 0 else "",
+                "Tags": "" if i else ", ".join(t for t in (first.get("material", ""), first.get("color", "")) if t),
+                "Published": "TRUE" if i == 0 else "",
+                "Option1 Name": (opt_names[0] if opt_names else "Title") if i == 0 else "",
+                "Option1 Value": vd.get(opt_names[0], "Default Title") if opt_names else "Default Title",
+                "Option2 Name": (opt_names[1] if len(opt_names) > 1 else "") if i == 0 else "",
+                "Option2 Value": vd.get(opt_names[1], "") if len(opt_names) > 1 else "",
+                "Option3 Name": (opt_names[2] if len(opt_names) > 2 else "") if i == 0 else "",
+                "Option3 Value": vd.get(opt_names[2], "") if len(opt_names) > 2 else "",
+                "Variant SKU": r.get("mpn", ""), "Variant Grams": grams,
+                "Variant Inventory Policy": "continue", "Variant Fulfillment Service": "manual",
+                "Variant Price": sale or price, "Variant Compare At Price": price if sale else "",
+                "Variant Requires Shipping": "FALSE" if r.get("is_digital") == "true" else "TRUE", "Variant Taxable": "TRUE",
+                "Variant Barcode": r.get("gtin", ""),
+                "Image Src": imgs[i] if i < len(imgs) else "", "Image Position": str(i + 1) if i < len(imgs) else "",
+                "Image Alt Text": (first.get("item_group_title") or first["title"]) if i < len(imgs) else "",
+                "SEO Title": first["title"][:70] if i == 0 else "", "SEO Description": first["description"][:320] if i == 0 else "",
+                "Variant Weight Unit": "lb" if r.get("item_weight_unit", "").startswith("lb") else ("kg" if r.get("weight") else ""),
+                "Status": "active" if i == 0 else "",
+            }
+            out.append(row)
+        # remaining images on extra rows (Shopify convention)
+        for j in range(len(vs), len(imgs)):
+            out.append({"Handle": handle, "Image Src": imgs[j], "Image Position": str(j + 1),
+                        "Image Alt Text": first.get("item_group_title") or first["title"]})
+    path = os.path.join(outdir, f"{domain}.shopify.csv")
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=SHOPIFY_FIELDS, extrasaction="ignore")
+        w.writeheader(); w.writerows(out)
+    return path
+
+
 def push_sftp(local_path, host, username, remote_dir="/", password=None, key_path=None, port=22):
     """Upload a snapshot to the SFTP location OpenAI assigns at approval (same filename every time)."""
     import paramiko
@@ -540,11 +615,12 @@ def run(domain, brand_name=None, woo_keys=None, outdir="feeds", check_urls=0):
     rows, issues, checkout_ok = build_rows(domain, products, brand_name, currency, policies, profile)
     tsv, gz = write_feed(domain, rows, outdir)
     gfeed = write_google_feed(domain, rows, outdir)
+    sfeed = write_shopify_csv(domain, rows, outdir)
     v = validate(rows, check_urls=check_urls)
     report = {
         "ok": True, "domain": domain, "platform": platform,
         "products": len(products), "feed_rows": len(rows),
-        "files": {"tsv": tsv, "tsv_gz": tsv[:-4] + ".tsv.gz", "csv_gz": gz, "google_tsv": gfeed},
+        "files": {"tsv": tsv, "tsv_gz": tsv[:-4] + ".tsv.gz", "csv_gz": gz, "google_tsv": gfeed, "shopify_csv": sfeed},
         "currency": currency, "currency_detected": cur_detected,
         "search_eligible": True,
         "checkout_eligible": checkout_ok,
