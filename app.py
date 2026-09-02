@@ -714,11 +714,16 @@ PAGE = """<!doctype html><html><head><title>CanAIShopYou — Get your store into
 <div class="tier"><b>Free</b><div class="per">eligibility check</div><ul><li>Your real feed generated on the spot</li><li>Spec validation: every error and gap listed</li><li>No signup, no code</li></ul></div>
 <div class="tier" style="border-color:var(--accent)"><b>Launch &middot; ${{ price_setup }}</b><div class="per">one-time</div><ul><li>Feed rebuilt to the full OpenAI spec &mdash; category, dimensions, shipping, returns, Q&amp;A, variants</li><li>Store fixes applied: policies, crawler access, missing data</li><li>Submitted with you to Google, Microsoft, Meta, Perplexity, Shopify Catalog and chatgpt.com/merchants</li><li>Validation report + crawler access (OAI-SearchBot, Bing, Google)</li></ul></div>
 <div class="tier"><b>Hosting &middot; ${{ price_month }}/mo</b><div class="per">after launch &middot; cancel anytime</div><ul><li>Feeds regenerated and re-fetched daily by Google, Microsoft, Meta; pushed to OpenAI by SFTP once approved</li><li>Monitoring: price/stock drift, broken URLs, crawler blocks, disapprovals &mdash; fixed within a business day</li><li>Optional ACP checkout endpoint kept ready</li></ul></div>
+<div class="tier" style="border-color:#111"><b>Sponsored Presence &middot; ${{ price_ads_setup }} + ${{ price_ads_month }}/mo</b><div class="per">guaranteed sponsored placement in ChatGPT &middot; 3-month minimum</div><ul><li><b>Guaranteed:</b> your products get sponsored impressions in ChatGPT every week the campaign is funded and approved &mdash; or that week's fee is credited</li><li>We run your ChatGPT product-feed ads, Google Shopping and Meta catalog ads; you pay ad spend to each platform on your own card, never to us</li><li>Real orders in 2&ndash;3 weeks from Google and Meta &mdash; the sales history Shopify Catalog needs for organic ChatGPT inclusion</li><li>Weekly report, written stop rule, no ranking or sales promise</li></ul></div>
 </div>
 <form method="post" action="/buy" style="display:flex;gap:10px;max-width:560px;margin:0 auto 6px;flex-wrap:wrap;justify-content:center">
 <input name="domain" placeholder="yourstore.com" required style="flex:1;min-width:180px"><input name="email" type="email" placeholder="you@yourstore.com" required style="flex:1;min-width:200px">
 <button>Launch my store &mdash; ${{ price_setup }} &rarr;</button></form>
-<p style="text-align:center;font-size:.8em;color:var(--dim);margin:0 0 18px">Secure card checkout by Stripe &middot; ${{ price_setup }} today, ${{ price_month }}/mo hosting starts after your feed is live &middot; full refund if we can't build a spec-clean feed from your store</p>
+<p style="text-align:center;font-size:.8em;color:var(--dim);margin:0 0 8px">Secure card checkout by Stripe &middot; ${{ price_setup }} today, ${{ price_month }}/mo hosting starts after your feed is live &middot; Launch fee refunded if we can't build a feed that passes OpenAI's published validation</p>
+<form method="post" action="/buy" style="display:flex;gap:10px;max-width:560px;margin:0 auto 6px;flex-wrap:wrap;justify-content:center">
+<input type="hidden" name="plan" value="ads"><input name="domain" placeholder="yourstore.com" required style="flex:1;min-width:180px"><input name="email" type="email" placeholder="you@yourstore.com" required style="flex:1;min-width:200px">
+<button style="background:#111">Add Sponsored Presence &mdash; ${{ price_ads_setup }} + ${{ price_ads_month }}/mo &rarr;</button></form>
+<p style="text-align:center;font-size:.8em;color:var(--dim);margin:0 0 18px">Includes Launch. US businesses only (OpenAI Ads Manager rule). Ad spend from about $25/day for ChatGPT is billed by the platforms to your card. Guarantee covers sponsored impressions in ChatGPT, not organic results, ranking, clicks or sales &mdash; see <a href="/terms">terms</a>.</p>
 <div class="card cta"><h3>Your Shopify competitors are already in.</h3>
 <p>Eligible US Shopify stores are already discoverable in ChatGPT by default. Google, Microsoft, Meta and Perplexity take product data today; OpenAI reviews direct-feed applications from a waitlist. Connect your store, see your feed and what it's missing in a minute.</p>
 <a class="btn" href="#top" onclick="document.querySelector('form.scan input[name=domain]').focus();return false">Check my store free &rarr;</a> <a class="btn" style="background:transparent;color:var(--ink);border:1px solid var(--hair)" href="/acp/onboard">Set up agent checkout &rarr;</a></div>
@@ -881,6 +886,18 @@ full. Approval, listing or ranking by any platform is not a refund condition. Ho
 when your validated feed has been delivered to at least one platform, whichever comes first; cancel any month with no further
 charge. Payments are processed by Stripe; we never see your card number.</span></div>
 
+<div class="card"><b>Sponsored Presence (managed advertising add-on)</b><br><span style="color:var(--mut)">
+Includes everything in Launch and Hosting plus set-up and weekly management of a ChatGPT product-feed campaign in OpenAI Ads Manager,
+a Google Shopping campaign and a Meta catalog campaign, conversion tracking, weekly reporting and a written stop rule. Three-month
+minimum term, then month-to-month. Advertising accounts belong to you, are opened in your business's name, and ad spend is charged by
+each platform to your own payment method; we never hold or bill ad spend. OpenAI Ads Manager currently requires a verified business in a
+supported country with a matching payment card; if your business cannot be verified, the add-on fee for unstarted months is refunded.
+<b>Guarantee:</b> while your ChatGPT product-feed campaign is approved, funded and within its budget, your products will receive sponsored
+impressions in ChatGPT conversations, as reported in OpenAI Ads Manager, in every 7-day period; if a funded, approved campaign records
+zero impressions in a 7-day period, that week's management fee is credited. The guarantee covers sponsored impressions only and makes no
+promise of organic inclusion, ranking, click volume, sales, return on ad spend, or appearance to ChatGPT Plus, Pro, Business or
+Enterprise users, and depends on OpenAI's relevance matching and policy approval.</span></div>
+
 <div class="card"><b>Your data and keys</b><br><span style="color:var(--mut)">
 To build feeds we read your store's public catalog. If you give us platform access, prefer manager or collaborator roles over
 passwords. If you choose the optional ACP checkout endpoint, you provide WooCommerce REST keys and a Stripe restricted key;
@@ -907,7 +924,8 @@ app = Flask(__name__)
 def index():
     # measurement era retired 1 Sep 2026 — the homepage is the connect funnel only
     return render_template_string(PAGE, r=None, ai=None, domain=None, scans=scan_count(), recent=recent_scans(),
-                                  price_setup=PRICE_SETUP, price_month=PRICE_MONTH)
+                                  price_setup=PRICE_SETUP, price_month=PRICE_MONTH,
+                                  price_ads_setup=PRICE_ADS_SETUP, price_ads_month=PRICE_ADS_MONTH)
 
 @app.route("/ai-test", methods=["GET", "POST"])
 def ai_test():
@@ -1037,6 +1055,8 @@ def connect():
 # ----------------------------------------------------------------------------- paid launch (Stripe Checkout)
 PRICE_SETUP = int(os.environ.get("PRICE_SETUP", "199"))
 PRICE_MONTH = int(os.environ.get("PRICE_MONTH", "29"))
+PRICE_ADS_SETUP = int(os.environ.get("PRICE_ADS_SETUP", "495"))   # Sponsored Presence launch (includes Launch)
+PRICE_ADS_MONTH = int(os.environ.get("PRICE_ADS_MONTH", "395"))   # managed ads, spend <= $1,000/mo; 3-month minimum
 
 def _stripe_key():
     return os.environ.get("STRIPE_SECRET_KEY")
@@ -1048,7 +1068,8 @@ def buy():
     email = (f.get("email", "")).strip()
     if not (domain and email):
         return redirect("/")
-    try: log_lead(domain, "", email, extra="clicked buy", kind="buy")
+    plan = "ads" if f.get("plan") == "ads" else "launch"
+    try: log_lead(domain, "", email, extra=f"clicked buy ({plan})", kind="buy")
     except Exception: pass
     key = _stripe_key()
     if not key:
@@ -1057,20 +1078,30 @@ def buy():
             f"<p>We've saved <b>{_html.escape(domain)}</b> and will email <b>{_html.escape(email)}</b> a secure payment link within 24 hours to launch your store.</p>"
             "<a class='btn' href='/'>&larr; Back</a></div></div>"))
     base = os.environ.get("PUBLIC_BASE", "https://canaishopyou.com")
+    if plan == "ads":
+        setup, month, trial = PRICE_ADS_SETUP, PRICE_ADS_MONTH, "14"
+        n1 = f"Sponsored Presence launch — {domain}"
+        d1 = "Includes Launch (feeds to every AI surface, submissions with you) plus ChatGPT product-feed ads, Google Shopping and Meta catalog campaigns set up in 14 days. Ad spend billed by the platforms to your card. 3-month minimum."
+        n2 = f"Sponsored Presence — managed ads & hosting — {domain}"
+    else:
+        setup, month, trial = PRICE_SETUP, PRICE_MONTH, "30"
+        n1 = f"AI shopping launch — {domain}"
+        d1 = "Feeds built to OpenAI's spec and the Google format, validated, submitted with you to Google, Microsoft, Meta, Perplexity, Shopify Catalog and chatgpt.com/merchants. Each platform decides inclusion."
+        n2 = f"Feed hosting & monitoring — {domain}"
     data = {
         "mode": "subscription", "customer_email": email,
         "success_url": f"{base}/thanks?sid={{CHECKOUT_SESSION_ID}}", "cancel_url": f"{base}/",
         "line_items[0][quantity]": "1", "line_items[0][price_data][currency]": "usd",
-        "line_items[0][price_data][unit_amount]": str(PRICE_SETUP * 100),
-        "line_items[0][price_data][product_data][name]": f"ChatGPT Shopping launch — {domain}",
-        "line_items[0][price_data][product_data][description]": "Feed rebuilt to the full OpenAI spec, store fixes, merchant application prepared and filed with you, checkout endpoint ready.",
+        "line_items[0][price_data][unit_amount]": str(setup * 100),
+        "line_items[0][price_data][product_data][name]": n1,
+        "line_items[0][price_data][product_data][description]": d1,
         "line_items[1][quantity]": "1", "line_items[1][price_data][currency]": "usd",
-        "line_items[1][price_data][unit_amount]": str(PRICE_MONTH * 100),
+        "line_items[1][price_data][unit_amount]": str(month * 100),
         "line_items[1][price_data][recurring][interval]": "month",
-        "line_items[1][price_data][product_data][name]": f"Feed hosting & monitoring — {domain}",
-        "subscription_data[trial_period_days]": "30",   # hosting starts billing once the feed is live (~30 days)
-        "subscription_data[metadata][domain]": domain,
-        "metadata[domain]": domain, "metadata[email]": email,
+        "line_items[1][price_data][product_data][name]": n2,
+        "subscription_data[trial_period_days]": trial,   # recurring fee starts once the work is live
+        "subscription_data[metadata][domain]": domain, "subscription_data[metadata][plan]": plan,
+        "metadata[domain]": domain, "metadata[email]": email, "metadata[plan]": plan,
         "allow_promotion_codes": "true", "billing_address_collection": "auto",
     }
     try:
@@ -1090,18 +1121,19 @@ def buy():
 def thanks():
     sid = request.args.get("sid", "")
     key = _stripe_key()
-    domain, email, paid = "", "", False
+    domain, email, paid, plan = "", "", False, "launch"
     if sid and key and re.match(r"^cs_[A-Za-z0-9_]+$", sid):
         try:
             j = requests.get(f"https://api.stripe.com/v1/checkout/sessions/{sid}", auth=(key, ""), timeout=20).json()
             paid = j.get("payment_status") == "paid" or j.get("status") == "complete"
             domain = (j.get("metadata") or {}).get("domain", ""); email = j.get("customer_email") or (j.get("customer_details") or {}).get("email", "")
+            plan = (j.get("metadata") or {}).get("plan", "launch")
         except Exception: pass
     if paid and domain:
         try:
-            log_lead(domain, "", email, extra=f"PAID ${PRICE_SETUP} + ${PRICE_MONTH}/mo (session {sid})", kind="paid")
+            log_lead(domain, "", email, extra=f"PAID plan={plan} (session {sid})", kind="paid")
             d = _load(); custs = d.setdefault("customers", {})
-            custs[domain] = {"email": email, "session": sid, "ts": _utcnow(), "status": "launch_paid"}
+            custs[domain] = {"email": email, "session": sid, "ts": _utcnow(), "status": f"{plan}_paid", "plan": plan}
             fb_list = d.setdefault("feeds_built", [])
             if domain not in fb_list: fb_list.append(domain)
             _save(d)
@@ -1118,7 +1150,9 @@ def thanks():
                f"<li><b>Within 24 hours:</b> we rebuild {dom}'s feed to the full spec and email you the validation report and the exact data we still need from you (usually shipping terms and return policy).</li>"
                f"<li><b>Within 3 business days:</b> store fixes applied, feed hosted at <code>https://canaishopyou.com/feeds/{dom}.tsv.gz</code>, your merchant application drafted for you to review and submit at chatgpt.com/merchants (we fill everything; you press submit because it's your company).</li>"
                f"<li><b>On approval:</b> OpenAI assigns an SFTP location; we push your daily snapshot from then on and monitor it. Hosting billing starts then, not before.</li>"
-               f"<li><b>Optional:</b> agent checkout &mdash; set up in 10 minutes at <a href='/acp/onboard'>/acp/onboard</a> whenever you want it.</li></ol>"
+               f"<li><b>Optional:</b> an ACP checkout endpoint &mdash; set up in 10 minutes at <a href='/acp/onboard'>/acp/onboard</a> whenever you want it.</li>"
+               + (f"<li><b>Sponsored Presence, days 1&ndash;14:</b> today, open your advertiser account at <a href='https://ads.openai.com'>ads.openai.com</a> in your business's legal name with a company card (OpenAI verifies the business; start now, approval takes days). We'll email the 14-day plan: Google Ads + Merchant Center and Meta accounts in your name, us added as manager, feeds and tracking installed, campaigns live by day 8, first weekly report day 14.</li>" if plan == "ads" else "")
+               + "</ol>"
                f"<p>Reply to your receipt email any time; a human (Mahmood) answers.</p>" if paid else
                "<p>We couldn't confirm the payment. If your card was charged, email <a href='mailto:mahmood@canaishopyou.com'>mahmood@canaishopyou.com</a> with your receipt and we'll sort it immediately.</p>")
             + "</div><p style='text-align:center'><a href='/'>&larr; home</a></p></div>")
