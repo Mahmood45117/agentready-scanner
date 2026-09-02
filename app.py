@@ -697,7 +697,7 @@ PAGE = """<!doctype html><html><head><title>CanAIShopYou — Get your store into
 <input name="email" type="email" placeholder="you@yourstore.com" required>
 <button>Connect my store &rarr;</button></form>
 <p style="margin-top:10px;font-size:.82em;color:var(--dim)">Free eligibility check &mdash; we generate your actual feed on the spot and show exactly what blocks you.</p>
-<div class="engines"><span class="lbl">The surfaces we plug you into</span><b>ChatGPT Shopping</b><b>Instant Checkout</b><b>Perplexity Merchants</b><b>MCP agents</b></div></div>
+<div class="engines"><span class="lbl">The surfaces we plug you into</span><b>ChatGPT Shopping</b><b>Google AI Mode &amp; Gemini</b><b>Microsoft Copilot</b><b>Meta AI</b><b>Perplexity</b></div></div>
 {% if not r %}
 <div class="card" style="border-left:3px solid var(--accent)">
 <div style="font-size:.72em;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--accent)">Why now</div>
@@ -1105,7 +1105,7 @@ def thanks():
 @app.route("/feeds/<path:fname>")
 def serve_feed(fname):
     from flask import send_from_directory, abort
-    if not re.match(r"^[a-z0-9.-]+\.(tsv|tsv\.gz|csv\.gz)$", fname):
+    if not re.match(r"^[a-z0-9.-]+\.(tsv|tsv\.gz|csv\.gz|google\.tsv)$", fname):
         abort(404)
     ua = request.headers.get("User-Agent", "")
     try:

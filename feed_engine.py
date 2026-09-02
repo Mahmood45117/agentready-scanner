@@ -456,6 +456,53 @@ def write_feed(domain, rows, outdir="feeds"):
     return tsv_path, gz_path
 
 
+GOOGLE_FIELDS = ["id", "item_group_id", "title", "description", "link", "image_link", "additional_image_link",
+                 "availability", "price", "sale_price", "brand", "gtin", "mpn", "identifier_exists", "condition",
+                 "product_type", "google_product_category", "color", "size", "material", "age_group",
+                 "shipping", "shipping_weight", "product_length", "product_width", "product_height",
+                 "product_detail", "custom_label_0"]
+
+
+def to_google_rows(rows):
+    """Same catalog in Google Merchant Center column names — accepted as-is by Google Merchant Center (scheduled
+    fetch), Microsoft Merchant Center, Meta Commerce Manager and Perplexity's merchant program. Those four are
+    the self-serve AI shopping surfaces (Gemini/AI Mode, Copilot, Meta AI, Perplexity)."""
+    out = []
+    for r in rows:
+        ship = ""
+        if r.get("shipping"):
+            p = r["shipping"].split(":")           # country:region:service:price:hmin:hmax:tmin:tmax
+            ship = ":".join(p[:4]) if len(p) >= 4 else r["shipping"]
+        out.append({
+            "id": r["item_id"], "item_group_id": r.get("group_id", ""),
+            "title": r["title"], "description": r["description"], "link": r["url"],
+            "image_link": r["image_url"], "additional_image_link": r.get("additional_image_urls", ""),
+            "availability": r["availability"].replace("_", " "),   # in stock / out of stock / preorder / backorder
+            "price": r["price"], "sale_price": r.get("sale_price", ""),
+            "brand": r["brand"], "gtin": r.get("gtin", ""), "mpn": r.get("mpn", ""),
+            "identifier_exists": "yes" if (r.get("gtin") or r.get("mpn")) else "no",
+            "condition": r.get("condition") or "new",
+            "product_type": r.get("product_category", ""), "google_product_category": r.get("product_category", ""),
+            "color": r.get("color", ""), "size": r.get("size", ""), "material": r.get("material", ""),
+            "age_group": r.get("age_group", ""), "shipping": ship,
+            "shipping_weight": f"{r['weight']} {r['item_weight_unit']}" if r.get("weight") else "",
+            "product_length": f"{r['length']} {r['dimensions_unit']}" if r.get("length") else "",
+            "product_width": f"{r['width']} {r['dimensions_unit']}" if r.get("width") else "",
+            "product_height": f"{r['height']} {r['dimensions_unit']}" if r.get("height") else "",
+            "product_detail": "Series:Series 01" if "Series 01" in (r.get("description") or "") else "",
+            "custom_label_0": r.get("seller_name", ""),
+        })
+    return out
+
+
+def write_google_feed(domain, rows, outdir="feeds"):
+    path = os.path.join(outdir, f"{domain}.google.tsv")
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=GOOGLE_FIELDS, delimiter="\t", extrasaction="ignore", quoting=csv.QUOTE_MINIMAL)
+        w.writeheader(); w.writerows(to_google_rows(rows))
+    return path
+
+
 def push_sftp(local_path, host, username, remote_dir="/", password=None, key_path=None, port=22):
     """Upload a snapshot to the SFTP location OpenAI assigns at approval (same filename every time)."""
     import paramiko
@@ -492,11 +539,12 @@ def run(domain, brand_name=None, woo_keys=None, outdir="feeds", check_urls=0):
     policies = discover_policies(domain)
     rows, issues, checkout_ok = build_rows(domain, products, brand_name, currency, policies, profile)
     tsv, gz = write_feed(domain, rows, outdir)
+    gfeed = write_google_feed(domain, rows, outdir)
     v = validate(rows, check_urls=check_urls)
     report = {
         "ok": True, "domain": domain, "platform": platform,
         "products": len(products), "feed_rows": len(rows),
-        "files": {"tsv": tsv, "tsv_gz": tsv[:-4] + ".tsv.gz", "csv_gz": gz},
+        "files": {"tsv": tsv, "tsv_gz": tsv[:-4] + ".tsv.gz", "csv_gz": gz, "google_tsv": gfeed},
         "currency": currency, "currency_detected": cur_detected,
         "search_eligible": True,
         "checkout_eligible": checkout_ok,

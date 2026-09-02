@@ -7,7 +7,8 @@
   "files": {
     "tsv": "feeds/linealprints.com.tsv",
     "tsv_gz": "feeds/linealprints.com.tsv.gz",
-    "csv_gz": "feeds/linealprints.com.csv.gz"
+    "csv_gz": "feeds/linealprints.com.csv.gz",
+    "google_tsv": "feeds/linealprints.com.google.tsv"
   },
   "currency": "USD",
   "currency_detected": true,
