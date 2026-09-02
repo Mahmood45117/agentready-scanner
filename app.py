@@ -705,7 +705,7 @@ PAGE = """<!doctype html><html><head><title>CanAIShopYou — Get your store into
 <p style="margin:0;color:var(--mut);font-size:.95em">There's no self-serve portal yet. That gap &mdash; between stores that got the channel for free and stores locked out of it &mdash; is exactly the work we do.</p>
 </div>
 <div class="steps">
-<div class="step"><span class="n">STEP 1</span><h4>🔌 Connect your store</h4><p>Shopify connects instantly from your domain. WooCommerce, BigCommerce and custom stacks connect with read-only API keys. No code on your side.</p></div>
+<div class="step"><span class="n">STEP 1</span><h4>🔌 Connect your store</h4><p>Shopify and WooCommerce connect instantly from your domain &mdash; no keys, no plugin. BigCommerce and custom stacks connect with read-only API keys. No code on your side.</p></div>
 <div class="step"><span class="n">STEP 2</span><h4>📦 We build &amp; host your feed</h4><p>Your catalog, transformed to OpenAI's exact product-feed spec &mdash; validated, hosted on our infrastructure, auto-refreshed so price and stock stay true.</p></div>
 <div class="step"><span class="n">STEP 3</span><h4>📨 We handle the application</h4><p>Crawler access, policy URLs, checkout-eligibility fields, and your ChatGPT merchant application &mdash; prepared and submitted for you.</p></div>
 <div class="step"><span class="n">STEP 4</span><h4>🛒 Agent checkout</h4><p>Our hosted checkout endpoint speaks the Agentic Commerce Protocol to ChatGPT, charges your Stripe, and drops the order into your store. Rolling out to connected merchants.</p></div>
@@ -944,7 +944,7 @@ def connect():
         reason = (rep or {}).get("reason", "we couldn't read a public catalog on this domain")
         body = ("<div class='wrap'><div class='card' style='margin-top:44px'><h2 style='margin:0 0 8px'>" + _html.escape(domain) + "</h2>"
                 "<p style='color:var(--mut)'>No public catalog found &mdash; " + _html.escape(reason) + ".</p>"
-                "<p>That usually means the store runs on <b>WooCommerce, BigCommerce or a custom stack</b> &mdash; exactly who we built this for. "
+                "<p>That usually means the store runs on <b>BigCommerce, Magento or a custom stack</b>, or a WooCommerce store with its public Store API switched off &mdash; exactly who we built this for. "
                 "Connecting takes one step: your platform's read-only API keys, and we generate the feed from those.</p></div>"
                 "<div class='card cta'><h3>We'll connect it with you</h3><p>Reply with your platform (Woo / BigCommerce / custom) and we'll onboard your catalog directly &mdash; you're in the queue as " + _html.escape(email) + ".</p>"
                 "<a class='btn' href='mailto:mahmood@canaishopyou.com?subject=Connect%20" + _html.escape(domain) + "'>Connect my store &rarr;</a></div>"
@@ -1011,6 +1011,11 @@ def serve_feed(fname):
 
 def _feed_managed(dom):
     managed = {x.strip().lower() for x in os.environ.get("MANAGED_FEEDS", "linealprints.com").split(",") if x.strip()}
+    try:  # committed list survives Render's ephemeral disk (the data file does not)
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "managed_feeds.txt")) as f:
+            managed |= {l.strip().lower() for l in f if l.strip() and not l.startswith("#")}
+    except Exception:
+        pass
     if dom in managed:
         return True
     try:
@@ -1108,7 +1113,7 @@ def guide_acp():
 
 @app.route("/how-it-works")
 def index_report():
-    body = ("<div class='card'><b>1 &middot; Connect your store</b><br><span style='color:var(--mut)'>Shopify stores connect instantly from the domain. WooCommerce, BigCommerce and custom stacks connect with read-only API keys &mdash; no code on your side.</span></div>"
+    body = ("<div class='card'><b>1 &middot; Connect your store</b><br><span style='color:var(--mut)'>Shopify and WooCommerce stores connect instantly from the domain &mdash; no keys, no plugin. BigCommerce and custom stacks connect with read-only API keys. No code on your side.</span></div>"
             "<div class='card'><b>2 &middot; We build and host your product feed</b><br><span style='color:var(--mut)'>Your catalog transformed to OpenAI's product-feed specification &mdash; every required field, checkout-eligibility flags, policy URLs &mdash; validated, hosted on our infrastructure and auto-refreshed so price and stock stay true.</span></div>"
             "<div class='card'><b>3 &middot; We handle the merchant application</b><br><span style='color:var(--mut)'>Crawler access, policies, and your ChatGPT merchant application prepared and submitted. We document every requirement and tell you exactly where it stands.</span></div>"
             "<div class='card'><b>4 &middot; Agent checkout</b><br><span style='color:var(--mut)'>Our hosted endpoint speaks the Agentic Commerce Protocol: ChatGPT completes the purchase, your payment account is charged, the order lands in your store. Rolling out to connected merchants.</span></div>"
