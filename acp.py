@@ -19,7 +19,8 @@ Permalink: /acp/o/<token> — email-gated order page (Woo has no login-free orde
 Spec: developers.openai.com/commerce/specs/checkout (API-Version 2025-09-12). See ../acp-gateway-design.md.
 Card data never touches this service (PCI: only spt_/pi_ ids and last4).
 """
-import base64, hashlib, hmac, json, os, secrets, sqlite3, threading, time, uuid
+import base64, hashlib, hmac, ipaddress, json, os, re, secrets, sqlite3, threading, time, uuid
+from collections import deque
 from datetime import datetime, timedelta, timezone
 
 import requests
@@ -33,26 +34,90 @@ SESSION_TTL = 60 * 60          # seconds a quote stays valid
 IDEMP_TTL = 24 * 60 * 60
 TS_WINDOW = 300                # ±5 min Timestamp tolerance
 MOCK_PAY = os.environ.get("ACP_MOCK_PAYMENTS") == "1"   # local testing without Stripe
+ENFORCE_IP = os.environ.get("ACP_ENFORCE_IP") == "1"    # only accept session calls from OpenAI's published egress ranges
+RATE_LIMIT = int(os.environ.get("ACP_RATE_LIMIT", "120"))  # requests / minute / (merchant, ip)
+HERE = os.path.dirname(os.path.abspath(__file__))
 
 # ----------------------------------------------------------------------------- merchants
 _MERCHANTS = None
 
 def merchants():
-    """{slug: config}. Source: env ACP_MERCHANTS (JSON) or acp_merchants.json next to this file (gitignored).
+    """{slug: config}. Sources, merged in this order: env ACP_MERCHANTS (JSON), acp_merchants.json next to this file
+    (gitignored), and merchants onboarded at runtime through /acp/onboard (kept in the app data file).
     Required per merchant: store_url, bearer_key, tos_url, privacy_url. For /complete: woo_ck, woo_cs, stripe_secret_key.
     Optional: policies_url, currency (default from cart), seller_name, openai_webhook_url, openai_webhook_key,
-              woo_webhook_secret, shipping: {"<woo rate_id or method_id>": {carrier, min_days, max_days, title}}"""
+              acp_signature_key, woo_webhook_secret, stripe_webhook_secret,
+              shipping: {"<woo rate_id or method_id>": {carrier, min_days, max_days, title, subtitle}}"""
     global _MERCHANTS
     if _MERCHANTS is None:
-        raw = os.environ.get("ACP_MERCHANTS")
-        if not raw:
-            p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "acp_merchants.json")
-            raw = open(p).read() if os.path.exists(p) else "{}"
-        _MERCHANTS = json.loads(raw)
-    return _MERCHANTS
+        cfg = {}
+        p = os.path.join(HERE, "acp_merchants.json")
+        if os.path.exists(p):
+            try: cfg.update(json.load(open(p)))
+            except Exception: pass
+        if os.environ.get("ACP_MERCHANTS"):
+            cfg.update(json.loads(os.environ["ACP_MERCHANTS"]))
+        _MERCHANTS = cfg
+    out = dict(_MERCHANTS)
+    out.update(_runtime_merchants())
+    return out
+
+def _runtime_merchants():
+    try:
+        return json.load(open(os.environ.get("DATA_FILE", "/tmp/cani_data.json"))).get("acp_merchants", {})
+    except Exception:
+        return {}
 
 def _m(slug):
     return merchants().get(slug)
+
+# ----------------------------------------------------------------------------- OpenAI egress allowlist + rate limit
+_ip_cache = {"nets": [], "at": 0}
+
+def _openai_nets():
+    if _now() - _ip_cache["at"] > 3600:
+        try:
+            d = requests.get("https://openai.com/chatgpt-connectors.json", headers=UA, timeout=10).json()
+            nets = []
+            for p in d.get("prefixes", []):
+                for k in ("ipv4Prefix", "ipv6Prefix"):
+                    if p.get(k):
+                        nets.append(ipaddress.ip_network(p[k], strict=False))
+            if nets:
+                _ip_cache.update(nets=nets, at=_now())
+        except Exception:
+            _ip_cache["at"] = _now() - 3000  # retry in 10 min, keep old list
+    return _ip_cache["nets"]
+
+def _client_ip():
+    return (request.headers.get("X-Forwarded-For", request.remote_addr or "")).split(",")[0].strip()
+
+def _ip_allowed(ip):
+    nets = _openai_nets()
+    if not nets:
+        return True  # list unavailable: don't lock ourselves out
+    try:
+        a = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return any(a in n for n in nets)
+
+_buckets = {}
+_buckets_lock = threading.Lock()
+
+def _rate_ok(key):
+    now = _now()
+    with _buckets_lock:
+        q = _buckets.setdefault(key, deque())
+        while q and q[0] < now - 60:
+            q.popleft()
+        if len(q) >= RATE_LIMIT:
+            return False
+        q.append(now)
+        if len(_buckets) > 5000:  # crude GC
+            for k in [k for k, v in _buckets.items() if not v or v[-1] < now - 120][:1000]:
+                _buckets.pop(k, None)
+    return True
 
 # ----------------------------------------------------------------------------- storage
 _db_lock = threading.Lock()
@@ -119,6 +184,11 @@ def _auth(slug):
     m = _m(slug)
     if not m:
         raise ACPError(404, "merchant_not_found", "unknown merchant")
+    ip = _client_ip()
+    if ENFORCE_IP and not _ip_allowed(ip):
+        raise ACPError(403, "forbidden", "source address not in the ChatGPT egress allowlist")
+    if not _rate_ok(f"{slug}:{ip}"):
+        raise ACPError(429, "rate_limited", "too many requests; retry shortly", etype="processing_error")
     auth = request.headers.get("Authorization", "")
     tok = auth[7:] if auth.startswith("Bearer ") else ""
     if not tok or not hmac.compare_digest(tok, m.get("bearer_key", "")):
@@ -216,9 +286,17 @@ class Woo:
             r = self.s.post(self._url("/cart/add-item"), json={"id": int(it["id"]), "quantity": int(it["quantity"])},
                             headers=self._h(tok), timeout=20)
             if r.status_code not in (200, 201):
-                msg = (r.json().get("message") if r.headers.get("content-type", "").startswith("application/json") else r.text)[:200]
-                code = "out_of_stock" if "stock" in (msg or "").lower() else "invalid"
-                raise ACPError(400, code, msg or "item rejected by store", param=f"$.items[?(@.id=='{it['id']}')]")
+                j = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+                wc, msg = (j.get("code") or ""), re.sub(r"&quot;", '"', (j.get("message") or r.text or "")[:200])
+                param = f"$.items[?(@.id=='{it['id']}')]"
+                if "stock" in msg.lower() or "out_of_stock" in wc:
+                    raise ACPError(400, "out_of_stock", msg or "item is out of stock", param=param)
+                if wc == "woocommerce_rest_missing_attributes":
+                    raise ACPError(400, "invalid", f"item {it['id']} is a variable product; use the id of a specific variant "
+                                   "(each variant is its own row in the product feed)", param=param)
+                if wc == "woocommerce_rest_cart_invalid_product":
+                    raise ACPError(400, "invalid", f"item {it['id']} does not exist in this store", param=param)
+                raise ACPError(400, "invalid", msg or "item rejected by store", param=param)
             cart = r.json()
         return cart
 
@@ -272,8 +350,8 @@ class Woo:
             "currency": quote["currency"].upper(),
             "billing": dict(a, email=(buyer or {}).get("email", ""), phone=(buyer or {}).get("phone_number", "") or ""),
             "shipping": a, "line_items": line_items,
-            "shipping_lines": [{"method_id": option["_method_id"], "method_title": option["title"],
-                                "total": f"{option['total'] / 100:.2f}"}] if option else [],
+            "shipping_lines": [{"method_id": option["_method_id"] or "flat_rate", "method_title": option["title"],
+                                "total": f"{option['total'] / 100:.2f}"}] if option and option.get("type") == "shipping" else [],
             "customer_note": "Placed via ChatGPT Instant Checkout",
             "meta_data": [{"key": "acp_checkout_session_id", "value": sess["id"]},
                           {"key": "stripe_payment_intent", "value": pi_id},
@@ -339,23 +417,37 @@ def build_quote(m, cart, option_id=None):
     options, selected = [], None
     shipping_cfg = m.get("shipping", {})
     now = datetime.now(timezone.utc)
-    for pkg in cart.get("shipping_rates", []):
-        for rt in pkg["shipping_rates"]:
-            cfg = shipping_cfg.get(rt["rate_id"]) or shipping_cfg.get(rt.get("method_id", "")) or {}
-            sub = _int(rt["price"]); tax = _int(rt.get("taxes") or 0)
-            opt = {
-                "type": "shipping", "id": rt["rate_id"],
-                "title": cfg.get("title") or rt["name"],
-                "subtitle": cfg.get("subtitle") or f"{cfg.get('min_days', 3)}–{cfg.get('max_days', 8)} business days",
-                "carrier": cfg.get("carrier", "USPS"),
-                "earliest_delivery_time": _rfc3339(now + timedelta(days=int(cfg.get("min_days", 3)))),
-                "latest_delivery_time": _rfc3339(now + timedelta(days=int(cfg.get("max_days", 8)))),
-                "subtotal": sub, "tax": tax, "total": sub + tax,
-                "_method_id": rt.get("method_id", ""), "_package_id": pkg.get("package_id", 0),
-            }
-            options.append(opt)
-            if rt.get("selected"):
-                selected = opt
+    packages = cart.get("shipping_rates", [])
+    if not cart.get("needs_shipping", True):
+        # digital-only cart: no address needed, one zero-cost digital option (spec: type=digital, no carrier/times)
+        options = [{"type": "digital", "id": "digital", "title": "Digital delivery", "subtitle": "Delivered by email",
+                    "subtotal": 0, "tax": 0, "total": 0, "_method_id": "", "_package_id": 0}]
+        selected = options[0]
+    elif len(packages) <= 1:
+        for pkg in packages:
+            for rt in pkg["shipping_rates"]:
+                opt = _ship_option(m, shipping_cfg, rt, now, pkg.get("package_id", 0))
+                options.append(opt)
+                if rt.get("selected"):
+                    selected = opt
+    else:
+        # multi-package cart (e.g. dropship + warehouse): one option per rate *name* that exists in every package, summed
+        by_name = {}
+        for pkg in packages:
+            for rt in pkg["shipping_rates"]:
+                by_name.setdefault(rt["name"], []).append((pkg.get("package_id", 0), rt))
+        for name, rts in by_name.items():
+            if len(rts) != len(packages):
+                continue
+            base = _ship_option(m, shipping_cfg, rts[0][1], now, rts[0][0])
+            base["id"] = "multi:" + hashlib.sha1(name.encode()).hexdigest()[:10]
+            base["subtotal"] = sum(_int(r["price"]) for _, r in rts)
+            base["tax"] = sum(_int(r.get("taxes") or 0) for _, r in rts)
+            base["total"] = base["subtotal"] + base["tax"]
+            base["_rates"] = [(pid, r["rate_id"]) for pid, r in rts]
+            options.append(base)
+            if all(r.get("selected") for _, r in rts):
+                selected = base
     if option_id:
         selected = next((o for o in options if o["id"] == option_id), selected)
     t = cart["totals"]
@@ -378,6 +470,37 @@ def build_quote(m, cart, option_id=None):
     return {"currency": cur, "line_items": line_items, "fulfillment_options": options,
             "fulfillment_option_id": selected["id"] if selected else None, "totals": totals,
             "_cart_items": cart_items, "_selected": selected}
+
+def _ship_option(m, shipping_cfg, rt, now, package_id):
+    cfg = shipping_cfg.get(rt["rate_id"]) or shipping_cfg.get(rt.get("method_id", "")) or _guess_shipping(rt["name"])
+    sub = _int(rt["price"]); tax = _int(rt.get("taxes") or 0)
+    return {
+        "type": "shipping", "id": rt["rate_id"],
+        "title": cfg.get("title") or rt["name"],
+        "subtitle": cfg.get("subtitle") or f"{cfg.get('min_days', 3)}–{cfg.get('max_days', 8)} business days",
+        "carrier": cfg.get("carrier", "USPS"),
+        "earliest_delivery_time": _rfc3339(now + timedelta(days=int(cfg.get("min_days", 3)))),
+        "latest_delivery_time": _rfc3339(now + timedelta(days=int(cfg.get("max_days", 8)))),
+        "subtotal": sub, "tax": tax, "total": sub + tax,
+        "_method_id": rt.get("method_id", ""), "_package_id": package_id,
+    }
+
+def _guess_shipping(name):
+    """Fallback carrier/window from the rate name when the merchant hasn't configured it (onboarding fills this properly)."""
+    n = (name or "").lower()
+    for kw, cfg in (("overnight", {"carrier": "UPS", "min_days": 1, "max_days": 2}),
+                    ("next day", {"carrier": "UPS", "min_days": 1, "max_days": 2}),
+                    ("express", {"carrier": "UPS", "min_days": 1, "max_days": 3}),
+                    ("expedited", {"carrier": "UPS", "min_days": 2, "max_days": 4}),
+                    ("priority", {"carrier": "USPS", "min_days": 2, "max_days": 4}),
+                    ("2-day", {"carrier": "UPS", "min_days": 2, "max_days": 3}),
+                    ("fedex", {"carrier": "FedEx", "min_days": 2, "max_days": 6}),
+                    ("ups", {"carrier": "UPS", "min_days": 2, "max_days": 6}),
+                    ("dhl", {"carrier": "DHL", "min_days": 3, "max_days": 8}),
+                    ("pickup", {"carrier": "Local pickup", "min_days": 0, "max_days": 2})):
+        if kw in n:
+            return cfg
+    return {"carrier": "USPS", "min_days": 4, "max_days": 9}
 
 def _public_option(o):
     return {k: v for k, v in o.items() if not k.startswith("_")}
@@ -405,6 +528,9 @@ def session_view(m, s, quote, messages=None, order=None, include_provider=True):
 def _status_for(s, quote):
     if s["status"] in ("completed", "canceled", "in_progress"):
         return s["status"]
+    sel = quote.get("_selected") or {}
+    if sel.get("type") == "digital":
+        return "ready_for_payment" if (s.get("buyer") or {}).get("email") else "not_ready_for_payment"
     return "ready_for_payment" if (s.get("address") and quote.get("fulfillment_option_id")) else "not_ready_for_payment"
 
 # ----------------------------------------------------------------------------- session persistence
@@ -433,9 +559,17 @@ def _requote(m, s):
     cart = w.add_items(tok, s["items"])
     if s.get("address"):
         cart = w.set_address(tok, s["address"], s.get("buyer"))
-        if s.get("option_id"):
+        if s.get("option_id") and s["option_id"] != "digital":
             try:
-                cart = w.select_rate(tok, s["option_id"])
+                if s["option_id"].startswith("multi:"):
+                    pre = build_quote(m, cart)
+                    opt = next((o for o in pre["fulfillment_options"] if o["id"] == s["option_id"]), None)
+                    if not opt:
+                        raise ACPError(400, "invalid", "shipping option unavailable", param="$.fulfillment_option_id")
+                    for pid, rid in opt["_rates"]:
+                        cart = w.select_rate(tok, rid, pid)
+                else:
+                    cart = w.select_rate(tok, s["option_id"])
             except ACPError:
                 s["option_id"] = None
     s["cart_token"] = tok
@@ -798,6 +932,334 @@ def woo_webhook(slug):
     _queue(slug, "order_updated", {"type": "order_updated", "data": {"type": "order", "checkout_session_id": row["session_id"],
            "permalink_url": _permalink(slug, row["woo_order_id"]), "status": status, "refunds": refunds}})
     return "", 200
+
+# ----------------------------------------------------------------------------- inbound: Stripe (refunds / disputes issued outside Woo)
+def _stripe_sig_ok(secret, raw, header):
+    """Stripe-Signature: t=<ts>,v1=<hex hmac sha256 of "<ts>.<raw>">"""
+    try:
+        parts = dict(p.split("=", 1) for p in header.split(","))
+        ts, v1 = parts["t"], parts["v1"]
+    except Exception:
+        return False
+    if abs(_now() - int(ts)) > TS_WINDOW:
+        return False
+    want = hmac.new(secret.encode(), f"{ts}.".encode() + raw, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(want, v1)
+
+@bp.route("/acp/<slug>/webhooks/stripe", methods=["POST"])
+def stripe_webhook(slug):
+    m = _m(slug)
+    if not m:
+        return "", 404
+    raw = request.get_data()
+    secret = m.get("stripe_webhook_secret")
+    if secret and not _stripe_sig_ok(secret, raw, request.headers.get("Stripe-Signature", "")):
+        return "bad signature", 401
+    ev = request.get_json(silent=True) or {}
+    if not ev.get("id"):
+        return "", 200
+    with _db_lock, _db() as c:
+        if c.execute("SELECT 1 FROM inbound WHERE source='stripe' AND ext_id=?", (ev["id"],)).fetchone():
+            return "", 200
+        c.execute("INSERT INTO inbound VALUES ('stripe',?,?)", (ev["id"], _now()))
+    obj = (ev.get("data") or {}).get("object") or {}
+    pi = obj.get("payment_intent") if isinstance(obj.get("payment_intent"), str) else (obj.get("payment_intent") or {}).get("id")
+    if ev.get("type", "").startswith("payment_intent."):
+        pi = obj.get("id")
+    if not pi:
+        return "", 200
+    with _db() as c:
+        row = c.execute("SELECT * FROM orders WHERE merchant=? AND stripe_pi=?", (slug, pi)).fetchone()
+    if not row:
+        return "", 200
+    t = ev.get("type")
+    if t == "charge.refunded":
+        refunded = int(obj.get("amount_refunded") or 0)
+        if refunded > (row["refunded"] or 0) and row["woo_order_id"] and m.get("woo_ck"):
+            # refund happened in Stripe (dashboard/dispute) -> record it in Woo without re-charging the PSP
+            delta = refunded - (row["refunded"] or 0)
+            try:
+                requests.post(f"{m['store_url'].rstrip('/')}/wp-json/wc/v3/orders/{row['woo_order_id']}/refunds",
+                              json={"amount": f"{delta / 100:.2f}", "reason": "Refunded via Stripe", "api_refund": False},
+                              auth=(m["woo_ck"], m["woo_cs"]), headers=UA, timeout=30)
+            except Exception:
+                pass
+        status = "canceled" if refunded >= (row["amount"] or 0) else row["status"]
+        with _db_lock, _db() as c:
+            c.execute("UPDATE orders SET refunded=?, status=? WHERE id=?", (refunded, status, row["id"]))
+        _queue(slug, "order_updated", {"type": "order_updated", "data": {"type": "order", "checkout_session_id": row["session_id"],
+               "permalink_url": _permalink(slug, row["woo_order_id"] or row["id"]), "status": status,
+               "refunds": [{"type": "original_payment", "amount": refunded}]}})
+    elif t == "charge.dispute.created":
+        with _db_lock, _db() as c:
+            c.execute("UPDATE orders SET status='manual_review' WHERE id=?", (row["id"],))
+        if row["woo_order_id"] and m.get("woo_ck"):
+            try:
+                requests.put(f"{m['store_url'].rstrip('/')}/wp-json/wc/v3/orders/{row['woo_order_id']}",
+                             json={"status": "on-hold", "customer_note": "Payment disputed on Stripe — on hold"},
+                             auth=(m["woo_ck"], m["woo_cs"]), headers=UA, timeout=30)
+            except Exception:
+                pass
+        _queue(slug, "order_updated", {"type": "order_updated", "data": {"type": "order", "checkout_session_id": row["session_id"],
+               "permalink_url": _permalink(slug, row["woo_order_id"] or row["id"]), "status": "manual_review", "refunds": []}})
+    return "", 200
+
+# ----------------------------------------------------------------------------- reconciliation (admin)
+def _admin_ok():
+    k = os.environ.get("ACP_ADMIN_KEY")
+    given = request.headers.get("X-Admin-Key") or request.args.get("key", "")
+    return bool(k) and hmac.compare_digest(given, k)
+
+def _stripe_pi_status(m, pi_id):
+    if pi_id.startswith("pi_mock_") or not m.get("stripe_secret_key"):
+        return "mock"
+    try:
+        r = requests.get(f"https://api.stripe.com/v1/payment_intents/{pi_id}", auth=(m["stripe_secret_key"], ""), headers=UA, timeout=20)
+        return r.json().get("status", f"http_{r.status_code}")
+    except Exception as e:
+        return f"error:{type(e).__name__}"
+
+@bp.route("/acp/<slug>/reconcile")
+def reconcile(slug):
+    """Every order must have a succeeded PaymentIntent AND an existing Woo order. ?fix=1 refunds orphans
+    (paid > 2h ago, no Woo order, retries exhausted)."""
+    if not _admin_ok():
+        return jsonify({"error": "admin key required"}), 401
+    m = _m(slug)
+    if not m:
+        return jsonify({"error": "unknown merchant"}), 404
+    fix = request.args.get("fix") == "1"
+    w = Woo(m)
+    report = {"merchant": slug, "checked": 0, "ok": 0, "issues": [], "fixed": []}
+    with _db() as c:
+        rows = c.execute("SELECT * FROM orders WHERE merchant=? ORDER BY created DESC LIMIT 500", (slug,)).fetchall()
+    for r in rows:
+        report["checked"] += 1
+        pi_status = _stripe_pi_status(m, r["stripe_pi"] or "")
+        woo = w.get_order(r["woo_order_id"]) if (r["woo_order_id"] and m.get("woo_ck")) else None
+        issue = None
+        if pi_status not in ("succeeded", "mock", "processing"):
+            issue = f"payment {pi_status}"
+        elif r["woo_order_id"] and not woo:
+            issue = "woo order missing"
+        elif not r["woo_order_id"]:
+            issue = "no woo order (pending_store)"
+            if fix and _now() - r["created"] > 7200:
+                res = stripe_refund(m, r["stripe_pi"]) if pi_status != "mock" else {"id": "re_mock"}
+                with _db_lock, _db() as c:
+                    c.execute("UPDATE orders SET status='canceled', refunded=amount WHERE id=?", (r["id"],))
+                report["fixed"].append({"order": r["id"], "refund": res.get("id"), "error": (res.get("error") or {}).get("message")})
+        elif woo and woo.get("status") == "trash":
+            issue = "woo order trashed"
+        if issue:
+            report["issues"].append({"order": r["id"], "session": r["session_id"], "pi": r["stripe_pi"], "issue": issue,
+                                     "amount": r["amount"], "created": _rfc3339(datetime.fromtimestamp(r["created"], timezone.utc))})
+        else:
+            report["ok"] += 1
+    with _db() as c:
+        report["outbox_failing"] = [dict(x) for x in c.execute(
+            "SELECT id,event,attempts,next_at FROM outbox WHERE merchant=? AND delivered IS NULL AND attempts>=3", (slug,)).fetchall()]
+    return jsonify(report)
+
+@bp.route("/acp/<slug>/status")
+def merchant_status(slug):
+    """Merchant-facing summary (bearer key)."""
+    m = _auth(slug)
+    with _db() as c:
+        n_sess = c.execute("SELECT COUNT(*) FROM sessions WHERE merchant=?", (slug,)).fetchone()[0]
+        by = dict(c.execute("SELECT status, COUNT(*) FROM sessions WHERE merchant=? GROUP BY status", (slug,)).fetchall())
+        orders = [dict(x) for x in c.execute("SELECT id, woo_order_id, amount, currency, status, created FROM orders WHERE merchant=? ORDER BY created DESC LIMIT 20", (slug,)).fetchall()]
+        revenue = c.execute("SELECT COALESCE(SUM(amount - refunded),0) FROM orders WHERE merchant=? AND status NOT IN ('canceled')", (slug,)).fetchone()[0]
+        undelivered = c.execute("SELECT COUNT(*) FROM outbox WHERE merchant=? AND delivered IS NULL", (slug,)).fetchone()[0]
+    return jsonify({"merchant": slug, "sessions": n_sess, "sessions_by_status": by, "orders": orders,
+                    "net_revenue_minor": revenue, "webhooks_pending": undelivered,
+                    "endpoints": {"base": f"{os.environ.get('ACP_PUBLIC_BASE', 'https://canaishopyou.com')}/acp/{slug}",
+                                  "woo_webhook": f"{os.environ.get('ACP_PUBLIC_BASE', 'https://canaishopyou.com')}/acp/{slug}/webhooks/woo",
+                                  "stripe_webhook": f"{os.environ.get('ACP_PUBLIC_BASE', 'https://canaishopyou.com')}/acp/{slug}/webhooks/stripe"}})
+
+# ----------------------------------------------------------------------------- onboarding (store URL + keys -> configured merchant)
+def _ai_key():
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return os.environ["ANTHROPIC_API_KEY"]
+    for p in (os.path.join(HERE, "../cani/.anthropic_key"), os.path.join(HERE, ".anthropic_key")):
+        if os.path.exists(p):
+            return open(p).read().strip()
+    return None
+
+def _llm_shipping_map(store_url, rates, policy_text):
+    """Ask Claude to map each Woo shipping rate to carrier + delivery window using the store's own shipping policy.
+    Falls back to _guess_shipping. Returns {rate_id: {carrier, min_days, max_days, title, subtitle}}."""
+    fallback = {r["rate_id"]: dict(_guess_shipping(r["name"]), title=r["name"]) for r in rates}
+    key = _ai_key()
+    if not key or not rates:
+        return fallback
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=key, timeout=30.0, max_retries=1)
+        tool = {"name": "shipping_map", "description": "Carrier and delivery window per shipping rate",
+                "input_schema": {"type": "object", "properties": {"rates": {"type": "array", "items": {"type": "object", "properties": {
+                    "rate_id": {"type": "string"}, "carrier": {"type": "string", "description": "USPS, UPS, FedEx, DHL, or the carrier named in the policy"},
+                    "min_days": {"type": "integer", "description": "earliest delivery, business days from order incl. handling"},
+                    "max_days": {"type": "integer"}, "title": {"type": "string"}, "subtitle": {"type": "string", "description": "short, e.g. '5–8 business days'"}},
+                    "required": ["rate_id", "carrier", "min_days", "max_days", "title", "subtitle"]}}}, "required": ["rates"]}}
+        msg = client.messages.create(
+            model=os.environ.get("ACP_AI_MODEL", "claude-sonnet-5"), max_tokens=800,
+            system="You configure checkout shipping options for an online store. Use only the store's shipping policy text and the rate names. "
+                   "If the policy gives handling/production time, add it to the window. Be conservative on max_days. Never invent a carrier the policy contradicts.",
+            tools=[tool], tool_choice={"type": "tool", "name": "shipping_map"},
+            messages=[{"role": "user", "content": f"Store: {store_url}\n\nShipping rates (Woo): {json.dumps([{k: r[k] for k in ('rate_id','name','price')} for r in rates])}\n\nShipping policy text:\n{policy_text[:6000] or '(none found)'}"}])
+        out = next(b.input for b in msg.content if getattr(b, "type", "") == "tool_use")
+        res = dict(fallback)
+        for r in out.get("rates", []):
+            if r.get("rate_id") in res:
+                res[r["rate_id"]] = {k: r[k] for k in ("carrier", "min_days", "max_days", "title", "subtitle") if k in r}
+        return res
+    except Exception as e:
+        import sys; print(f"[acp] llm shipping map failed: {e}", file=sys.stderr)
+        return fallback
+
+def _store_policy_text(store_url, keywords=("shipping", "delivery")):
+    try:
+        import feed_engine
+        pages = requests.get(f"{store_url.rstrip('/')}/wp-json/wp/v2/pages?per_page=100&_fields=slug,link,content", headers=UA, timeout=20).json()
+        for pg in pages if isinstance(pages, list) else []:
+            if any(k in (pg.get("slug") or "") for k in keywords):
+                return feed_engine._txt((pg.get("content") or {}).get("rendered", ""), cap=8000)
+    except Exception:
+        pass
+    return ""
+
+def onboard_merchant(store_url, woo_ck=None, woo_cs=None, stripe_secret_key=None, seller_name=None, contact_email=None):
+    """Run every connectivity check, discover policies + shipping, build the merchant config. Returns (config|None, checks)."""
+    import feed_engine
+    store_url = "https://" + re.sub(r"^https?://", "", store_url.strip().lower()).split("/")[0]
+    domain = store_url[8:]
+    checks, cfg = {}, {"store_url": store_url, "seller_name": seller_name or domain.split(".")[0].title()}
+    m_tmp = dict(cfg)
+    # 1. Store API reachable + a quote works
+    rates, currency = [], None
+    try:
+        w = Woo(m_tmp); tok = w.new_cart()
+        prods = requests.get(f"{store_url}/wp-json/wc/store/v1/products?per_page=5", headers=UA, timeout=20).json()
+        pid = None
+        for p in prods:
+            if p.get("is_purchasable") and p.get("is_in_stock"):
+                pid = (p.get("variations") or [{}])[0].get("id") or p["id"]; break
+        if pid:
+            w.add_items(tok, [{"id": pid, "quantity": 1}])
+            cart = w.set_address(tok, {"line_one": "1 Market St", "city": "San Francisco", "state": "CA", "postal_code": "94105", "country": "US"}, None)
+            currency = cart["totals"].get("currency_code")
+            rates = [rt for pkg in cart.get("shipping_rates", []) for rt in pkg["shipping_rates"]]
+        checks["store_api"] = {"ok": True, "sample_item": pid, "rates": [r["rate_id"] for r in rates], "currency": currency}
+    except Exception as e:
+        checks["store_api"] = {"ok": False, "error": str(e)[:160]}
+    # 2. Woo REST credentials (needed to create orders)
+    if woo_ck and woo_cs:
+        try:
+            r = requests.get(f"{store_url}/wp-json/wc/v3/orders?per_page=1", auth=(woo_ck, woo_cs), headers=UA, timeout=20)
+            checks["woo_rest"] = {"ok": r.status_code == 200, "http": r.status_code}
+            if r.status_code == 200:
+                cfg.update(woo_ck=woo_ck, woo_cs=woo_cs)
+        except Exception as e:
+            checks["woo_rest"] = {"ok": False, "error": str(e)[:160]}
+    else:
+        checks["woo_rest"] = {"ok": False, "error": "no keys given (needed to create orders)"}
+    # 3. Stripe key valid + charges enabled
+    if stripe_secret_key:
+        try:
+            r = requests.get("https://api.stripe.com/v1/account", auth=(stripe_secret_key, ""), headers=UA, timeout=20)
+            a = r.json()
+            ok = r.status_code == 200 and a.get("charges_enabled")
+            checks["stripe"] = {"ok": bool(ok), "account": a.get("id"), "country": a.get("country"), "charges_enabled": a.get("charges_enabled"),
+                                "livemode": not stripe_secret_key.startswith("sk_test_"), "error": (a.get("error") or {}).get("message")}
+            if r.status_code == 200:
+                cfg["stripe_secret_key"] = stripe_secret_key
+        except Exception as e:
+            checks["stripe"] = {"ok": False, "error": str(e)[:160]}
+    else:
+        checks["stripe"] = {"ok": False, "error": "no key given"}
+    # 4. Policies (checkout gate) + shipping/returns pages
+    pol = feed_engine.discover_policies(domain)
+    checks["policies"] = {"ok": bool(pol.get("seller_privacy_policy") and pol.get("seller_tos")), **pol}
+    cfg["privacy_url"], cfg["tos_url"] = pol.get("seller_privacy_policy", ""), pol.get("seller_tos", "")
+    ship_text = _store_policy_text(store_url)
+    try:
+        pages = requests.get(f"{store_url}/wp-json/wp/v2/pages?per_page=100&_fields=slug,link", headers=UA, timeout=20).json()
+        for pg in pages if isinstance(pages, list) else []:
+            if any(k in (pg.get("slug") or "") for k in ("shipping", "return", "refund")):
+                cfg["policies_url"] = pg["link"]; break
+    except Exception:
+        pass
+    # 5. Shipping map (LLM over the store's own policy text)
+    cfg["shipping"] = _llm_shipping_map(store_url, rates, ship_text)
+    checks["shipping_map"] = {"ok": bool(cfg["shipping"]), "rates": cfg["shipping"], "policy_text_found": bool(ship_text)}
+    cfg["currency"] = currency or "USD"
+    cfg["bearer_key"] = "acp_" + secrets.token_urlsafe(32)
+    if contact_email:
+        cfg["contact_email"] = contact_email
+    slug = re.sub(r"[^a-z0-9]+", "", domain.split(".")[0]) or secrets.token_hex(4)
+    ready = checks["store_api"].get("ok") and checks["policies"]["ok"]
+    return (slug, cfg) if ready else (slug, None), checks
+
+ONBOARD_HTML = """<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>Connect your store to ChatGPT Instant Checkout · CanAIShopYou</title>
+<style>body{font-family:-apple-system,system-ui,sans-serif;max-width:640px;margin:40px auto;padding:0 20px;color:#111;line-height:1.45}
+label{display:block;margin:14px 0 4px;font-weight:600}input{font-size:16px;padding:10px;width:100%;box-sizing:border-box;border:1px solid #ccc;border-radius:8px}
+button{font-size:16px;padding:12px 18px;margin-top:18px;background:#111;color:#fff;border:0;border-radius:8px}.mut{color:#666;font-size:.92em}
+pre{background:#f6f6f6;padding:12px;border-radius:8px;overflow:auto;font-size:.85em}.ok{color:#0a7d3c}.bad{color:#b00020}</style>
+<h2>Connect your store to ChatGPT Instant Checkout</h2>
+<p class=mut>WooCommerce today. We run every check, map your shipping options from your own policy page, and hand you a live checkout endpoint for your ChatGPT merchant application. Keys are stored encrypted on our side and never shown again.</p>
+<form method=post>
+<label>Store URL</label><input name=store_url placeholder="https://yourstore.com" required>
+<label>Store / brand name</label><input name=seller_name placeholder="Your Brand">
+<label>Contact email</label><input name=contact_email type=email placeholder="you@yourstore.com">
+<label>WooCommerce REST consumer key <span class=mut>(WooCommerce → Settings → Advanced → REST API → Add key, Read/Write)</span></label><input name=woo_ck placeholder="ck_…">
+<label>WooCommerce REST consumer secret</label><input name=woo_cs placeholder="cs_…" type=password>
+<label>Stripe secret key <span class=mut>(Developers → API keys; a restricted key with PaymentIntents + Refunds write is enough)</span></label><input name=stripe_secret_key placeholder="sk_live_… or rk_live_…" type=password>
+<button>Run checks &amp; connect</button></form>
+{% if checks %}<h3>Results</h3>
+<ul>{% for k, v in checks.items() %}<li><b>{{k}}</b>: <span class="{{'ok' if v.get('ok') else 'bad'}}">{{'OK' if v.get('ok') else 'FAILED'}}</span> <span class=mut>{{ v | tojson }}</span></li>{% endfor %}</ul>
+{% if cfg %}<h3 class=ok>Connected: {{slug}}</h3>
+<p>Your Agentic Checkout base URL for the OpenAI merchant application:</p><pre>{{base}}/acp/{{slug}}</pre>
+<p>Your endpoint bearer key (OpenAI will send it as <code>Authorization: Bearer …</code>). Shown once:</p><pre>{{cfg.bearer_key}}</pre>
+<p>Add these two webhooks so order status and refunds stay in sync:</p>
+<pre>WooCommerce → Settings → Advanced → Webhooks → Add: topic "Order updated" → {{base}}/acp/{{slug}}/webhooks/woo
+Stripe → Developers → Webhooks → Add endpoint: events charge.refunded, charge.dispute.created → {{base}}/acp/{{slug}}/webhooks/stripe</pre>
+<p class=mut>Shipping options as we'll present them to ChatGPT (from your policy page): <code>{{cfg.shipping | tojson}}</code>. Email us to adjust.</p>
+{% else %}<p class=bad>Not connected yet — fix the failed checks above and run again.</p>{% endif %}{% endif %}"""
+
+@bp.route("/acp/onboard", methods=["GET", "POST"])
+def onboard():
+    if request.method == "GET":
+        return render_template_string(ONBOARD_HTML, checks=None)
+    f = request.form if request.form else (request.get_json(silent=True) or {})
+    if not (f.get("store_url") or "").strip():
+        return render_template_string(ONBOARD_HTML, checks={"store_url": {"ok": False, "error": "required"}}, cfg=None)
+    ip = _client_ip()
+    if not _rate_ok(f"onboard:{ip}") or not _rate_ok("onboard:global"):
+        return "Too many attempts, try again later.", 429
+    (slug, cfg), checks = onboard_merchant(f.get("store_url"), f.get("woo_ck") or None, f.get("woo_cs") or None,
+                                           f.get("stripe_secret_key") or None, f.get("seller_name") or None, f.get("contact_email") or None)
+    if cfg:
+        # persist at runtime (app data file); secrets never echoed except the bearer key, once
+        try:
+            df = os.environ.get("DATA_FILE", "/tmp/cani_data.json")
+            d = json.load(open(df)) if os.path.exists(df) else {}
+            d.setdefault("acp_merchants", {})[slug] = dict(cfg, onboarded=_now(), source_ip=ip)
+            json.dump(d, open(df, "w"))
+        except Exception as e:
+            import sys; print(f"[acp] onboard persist failed: {e}", file=sys.stderr)
+        try:
+            from app import log_lead
+            log_lead(cfg["store_url"], "", cfg.get("contact_email", ""), extra=f"acp onboard {slug}", kind="acp")
+        except Exception:
+            pass
+    if request.is_json:
+        return jsonify({"slug": slug, "connected": bool(cfg), "checks": checks,
+                        "endpoint": f"{os.environ.get('ACP_PUBLIC_BASE', 'https://canaishopyou.com')}/acp/{slug}" if cfg else None,
+                        "bearer_key": cfg["bearer_key"] if cfg else None, "shipping": cfg["shipping"] if cfg else None})
+    return render_template_string(ONBOARD_HTML, checks=checks, cfg=cfg, slug=slug,
+                                   base=os.environ.get("ACP_PUBLIC_BASE", "https://canaishopyou.com"))
 
 # ----------------------------------------------------------------------------- health
 @bp.route("/acp/<slug>/health")
