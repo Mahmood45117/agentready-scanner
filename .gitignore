@@ -9,3 +9,5 @@ cani_data.json
 DEPLOY.md
 INVOICE_TEMPLATE.md
 feeds/
+acp_merchants.json
+*.sqlite

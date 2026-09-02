@@ -916,6 +916,11 @@ try:
     import feed_engine as _fe
 except Exception:
     _fe = None
+try:  # Agentic Checkout gateway — /acp/<merchant>/checkout_sessions… (see acp.py)
+    import acp as _acp
+    app.register_blueprint(_acp.bp)
+except Exception:
+    import traceback as _tb, sys as _sys2; _tb.print_exc(file=_sys2.stderr)
 FEEDS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "feeds")
 
 @app.route("/connect", methods=["POST"])
