@@ -1,7 +1,8 @@
 """
 acp.py — Agentic Checkout gateway (OpenAI Agentic Commerce Protocol) for non-Shopify stores.
 
-Hosts the five merchant endpoints ChatGPT Instant Checkout calls, in front of a WooCommerce store:
+Hosts the five merchant endpoints of OpenAI's Agentic Checkout spec, in front of a WooCommerce store
+(ChatGPT retired in-chat Instant Checkout in March 2026; this stays ready for any agent that speaks ACP):
 
   POST /acp/<merchant>/checkout_sessions                 create
   POST /acp/<merchant>/checkout_sessions/<id>            update
@@ -366,13 +367,13 @@ class Woo:
             line_items.append(li)
         body = {
             "status": "processing", "set_paid": True, "payment_method": "stripe",
-            "payment_method_title": "ChatGPT Instant Checkout (Stripe)", "transaction_id": pi_id,
+            "payment_method_title": "AI agent checkout via ACP (Stripe)", "transaction_id": pi_id,
             "currency": quote["currency"].upper(),
             "billing": dict(a, email=(buyer or {}).get("email", ""), phone=(buyer or {}).get("phone_number", "") or ""),
             "shipping": a, "line_items": line_items,
             "shipping_lines": [{"method_id": option["_method_id"] or "flat_rate", "method_title": option["title"],
                                 "total": f"{option['total'] / 100:.2f}"}] if option and option.get("type") == "shipping" else [],
-            "customer_note": "Placed via ChatGPT Instant Checkout",
+            "customer_note": "Placed by an AI shopping agent (Agentic Commerce Protocol)",
             "meta_data": [{"key": "acp_checkout_session_id", "value": sess["id"]},
                           {"key": "stripe_payment_intent", "value": pi_id},
                           {"key": "_acp_gateway", "value": "canaishopyou"}],
@@ -798,7 +799,7 @@ def _stripe_charge(m, spt, amount, currency, session_id, email=None):
         "payment_method_data[shared_payment_granted_token]": spt,
         "automatic_payment_methods[enabled]": "true", "automatic_payment_methods[allow_redirects]": "never",
         "metadata[acp_checkout_session_id]": session_id, "metadata[gateway]": "canaishopyou",
-        "description": f"{m.get('seller_name') or m['store_url']} — ChatGPT Instant Checkout",
+        "description": f"{m.get('seller_name') or m['store_url']} — AI agent checkout (ACP)",
     }
     if email:
         data["receipt_email"] = email
@@ -842,7 +843,7 @@ button{font-size:16px;padding:10px 16px;margin-top:10px}.mut{color:#666}table{wi
 <form method=post><input name=email type=email placeholder="you@example.com" required autofocus><button>View order</button></form>
 {% if bad %}<p class=mut>That email doesn't match this order.</p>{% endif %}</div>
 {% else %}
-<div class=card><p><b>Status:</b> {{order.status}}</p><p class=mut>Placed {{order.date_created}} · Paid via ChatGPT Instant Checkout</p>
+<div class=card><p><b>Status:</b> {{order.status}}</p><p class=mut>Placed {{order.date_created}} · Paid via AI agent checkout</p>
 <table>{% for li in order.line_items %}<tr><td>{{li.name}} × {{li.quantity}}</td><td style="text-align:right">{{cur}} {{li.total}}</td></tr>{% endfor %}
 <tr><td>Shipping</td><td style="text-align:right">{{cur}} {{order.shipping_total}}</td></tr>
 <tr><td><b>Total</b></td><td style="text-align:right"><b>{{cur}} {{order.total}}</b></td></tr></table>
@@ -1274,13 +1275,13 @@ def onboard_merchant(store_url, woo_ck=None, woo_cs=None, stripe_secret_key=None
     return (slug, cfg) if ready else (slug, None), checks
 
 ONBOARD_HTML = """<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
-<title>Connect your store to ChatGPT Instant Checkout · CanAIShopYou</title>
+<title>Prepare an ACP checkout endpoint · CanAIShopYou</title>
 <style>body{font-family:-apple-system,system-ui,sans-serif;max-width:640px;margin:40px auto;padding:0 20px;color:#111;line-height:1.45}
 label{display:block;margin:14px 0 4px;font-weight:600}input{font-size:16px;padding:10px;width:100%;box-sizing:border-box;border:1px solid #ccc;border-radius:8px}
 button{font-size:16px;padding:12px 18px;margin-top:18px;background:#111;color:#fff;border:0;border-radius:8px}.mut{color:#666;font-size:.92em}
 pre{background:#f6f6f6;padding:12px;border-radius:8px;overflow:auto;font-size:.85em}.ok{color:#0a7d3c}.bad{color:#b00020}</style>
-<h2>Connect your store to ChatGPT Instant Checkout</h2>
-<p class=mut>WooCommerce today. We run every check, map your shipping options from your own policy page, and hand you a live checkout endpoint for your ChatGPT merchant application. Keys are stored encrypted on our side and never shown again.</p>
+<h2>Prepare an ACP checkout endpoint (optional)</h2>
+<p class=mut>ChatGPT does not run in-chat checkout for merchants today (OpenAI retired Instant Checkout in March 2026; shoppers buy on your site). This sets up a sandbox-tested Agentic Commerce Protocol endpoint in front of your WooCommerce store, ready to reference if agent checkout reopens. We run every check and map your shipping options from your own policy page. Use a Stripe <b>restricted</b> key (PaymentIntents + Refunds) rather than your secret key; keys are stored encrypted, never shown again, and deleted on request (see <a href="/terms">terms</a>).</p>
 <form method=post>
 <label>Store URL</label><input name=store_url placeholder="https://yourstore.com" required>
 <label>Store / brand name</label><input name=seller_name placeholder="Your Brand">
@@ -1292,7 +1293,7 @@ pre{background:#f6f6f6;padding:12px;border-radius:8px;overflow:auto;font-size:.8
 {% if checks %}<h3>Results</h3>
 <ul>{% for k, v in checks.items() %}<li><b>{{k}}</b>: <span class="{{'ok' if v.get('ok') else 'bad'}}">{{'OK' if v.get('ok') else 'FAILED'}}</span> <span class=mut>{{ v | tojson }}</span></li>{% endfor %}</ul>
 {% if cfg %}<h3 class=ok>Connected: {{slug}}</h3>
-<p>Your Agentic Checkout base URL for the OpenAI merchant application:</p><pre>{{base}}/acp/{{slug}}</pre>
+<p>Your ACP checkout base URL (sandbox-tested; reference it if OpenAI reopens merchant checkout):</p><pre>{{base}}/acp/{{slug}}</pre>
 <p>Your endpoint bearer key (OpenAI will send it as <code>Authorization: Bearer …</code>). Shown once:</p><pre>{{cfg.bearer_key}}</pre>
 <p>Add these two webhooks so order status and refunds stay in sync:</p>
 <pre>WooCommerce → Settings → Advanced → Webhooks → Add: topic "Order updated" → {{base}}/acp/{{slug}}/webhooks/woo
