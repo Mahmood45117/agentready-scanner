@@ -711,13 +711,17 @@ PAGE = """<!doctype html><html><head><title>CanAIShopYou — Get your store into
 <div class="step"><span class="n">STEP 4</span><h4>🛒 Agent checkout</h4><p>Our hosted checkout endpoint speaks the Agentic Commerce Protocol to ChatGPT, charges your Stripe, and drops the order into your store. Rolling out to connected merchants.</p></div>
 </div>
 <div class="price">
-<div class="tier"><b>Free</b><div class="per">eligibility check</div><ul><li>Your real feed generated on the spot</li><li>Exactly what blocks search &amp; checkout</li><li>No signup, no code</li></ul></div>
-<div class="tier"><b>Launch</b><div class="per">into the pipeline</div><ul><li>Feed built, validated &amp; hosted</li><li>Auto-refresh + crawler access</li><li>Merchant application handled</li></ul></div>
-<div class="tier"><b>Infrastructure</b><div class="per">monthly + % of agent sales</div><ul><li>Always-on feed hosting &amp; monitoring</li><li>Agent checkout endpoint (ACP + Stripe)</li><li>You earn from the channel &mdash; so do we</li></ul></div>
+<div class="tier"><b>Free</b><div class="per">eligibility check</div><ul><li>Your real feed generated on the spot</li><li>Spec validation: every error and gap listed</li><li>No signup, no code</li></ul></div>
+<div class="tier" style="border-color:var(--accent)"><b>Launch &middot; ${{ price_setup }}</b><div class="per">one-time</div><ul><li>Feed rebuilt to the full OpenAI spec &mdash; category, dimensions, shipping, returns, Q&amp;A, variants</li><li>Store fixes applied: policies, crawler access, missing data</li><li>Your merchant application prepared and filed with you</li><li>Hosted checkout endpoint ready for agent purchases</li></ul></div>
+<div class="tier"><b>Hosting &middot; ${{ price_month }}/mo</b><div class="per">after launch &middot; cancel anytime</div><ul><li>Daily snapshot pushed to OpenAI (SFTP/API) once approved</li><li>Monitoring: price/stock drift, broken URLs, crawler blocks</li><li>Checkout endpoint hosting, refunds &amp; order sync</li></ul></div>
 </div>
+<form method="post" action="/buy" style="display:flex;gap:10px;max-width:560px;margin:0 auto 6px;flex-wrap:wrap;justify-content:center">
+<input name="domain" placeholder="yourstore.com" required style="flex:1;min-width:180px"><input name="email" type="email" placeholder="you@yourstore.com" required style="flex:1;min-width:200px">
+<button>Launch my store &mdash; ${{ price_setup }} &rarr;</button></form>
+<p style="text-align:center;font-size:.8em;color:var(--dim);margin:0 0 18px">Secure card checkout by Stripe &middot; ${{ price_setup }} today, ${{ price_month }}/mo hosting starts after your feed is live &middot; full refund if we can't build a spec-clean feed from your store</p>
 <div class="card cta"><h3>Your Shopify competitors are already in.</h3>
 <p>The AI shopping channel is open now and the tooling gap won't last. Connect your store, see your eligibility in a minute, and get in while it's early.</p>
-<a class="btn" href="mailto:mahmood@canaishopyou.com?subject=Connect%20my%20store">Talk to us &rarr;</a></div>
+<a class="btn" href="#top" onclick="document.querySelector('form.scan input[name=domain]').focus();return false">Check my store free &rarr;</a> <a class="btn" style="background:transparent;color:var(--ink);border:1px solid var(--hair)" href="/acp/onboard">Set up agent checkout &rarr;</a></div>
 {% endif %}
 {% if r %}
 <div class="card" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap"><span class="score c{{r.grade}}">{{r.score}}<span class="outof">/100</span></span> <span class="pill p{{r.grade}}" style="font-size:1em;padding:6px 16px">GRADE {{r.grade}}</span> <span class="dom">{{r.domain}}</span></div>
@@ -880,7 +884,8 @@ app = Flask(__name__)
 @app.route("/", methods=["GET"])
 def index():
     # measurement era retired 1 Sep 2026 — the homepage is the connect funnel only
-    return render_template_string(PAGE, r=None, ai=None, domain=None, scans=scan_count(), recent=recent_scans())
+    return render_template_string(PAGE, r=None, ai=None, domain=None, scans=scan_count(), recent=recent_scans(),
+                                  price_setup=PRICE_SETUP, price_month=PRICE_MONTH)
 
 @app.route("/ai-test", methods=["GET", "POST"])
 def ai_test():
@@ -961,8 +966,17 @@ def connect():
     except Exception: pass
     q = rep.get("data_quality", {})
     blockers = rep.get("checkout_blockers", [])
-    fb = f"https://canaishopyou.com/feeds/{rep['domain']}.csv.gz"
+    fb = f"https://canaishopyou.com/feeds/{rep['domain']}.tsv.gz"
     ck_ok = rep.get("checkout_eligible")
+    spec = rep.get("spec") or {}
+    score = spec.get("recommended_completeness_pct", 0)
+    missing = spec.get("recommended_missing", [])
+    errs = spec.get("errors", [])
+    FIELD_WHY = {"gtin": "GTIN barcodes (matching across sellers)", "mpn": "manufacturer part numbers", "product_category": "a category path (\"helps categorization, filtering and search relevance\")",
+                 "material": "material", "color": "colour", "condition": "condition", "length": "dimensions with units", "weight": "weight with units",
+                 "additional_image_urls": "extra product images", "group_id": "variant grouping", "variant_dict": "variant attributes",
+                 "shipping": "a shipping cost + transit-time string", "accepts_returns": "return terms", "return_policy": "a return-policy URL",
+                 "review_count": "review counts and ratings", "q_and_a": "product Q&A", "related_product_id": "related-product links", "seller_url": "a seller URL"}
     rows = "".join(
         f"<tr><td style='padding:8px;border-bottom:1px solid var(--hair)'><b>{k}</b></td><td style='padding:8px;border-bottom:1px solid var(--hair)'>{v}</td></tr>"
         for k, v in [
@@ -970,21 +984,122 @@ def connect():
             ("Products found", rep.get("products")),
             ("Feed rows generated", rep.get("feed_rows")),
             ("Currency", rep.get("currency") + ("" if rep.get("currency_detected") else " (assumed)")),
+            ("Spec errors", "<span class='PASS'>0</span>" if not errs else f"<span class='WARN'>{spec.get('error_count')}</span> &mdash; e.g. {_html.escape(errs[0])}"),
             ("Search eligibility", "<span class='PASS'>READY</span>"),
             ("Checkout eligibility", "<span class='PASS'>READY</span>" if ck_ok else "<span class='WARN'>BLOCKED</span> missing: " + ", ".join(blockers)),
+            ("Recommended data filled", f"<b>{score}%</b> of what OpenAI says improves ranking &amp; relevance"),
             ("Items missing GTIN/SKU", q.get("no_identifier", 0)),
             ("Items missing images", q.get("no_image", 0)),
         ])
+    gaps = ""
+    if missing:
+        gaps = ("<p style='margin:14px 0 4px'><b>What your catalog doesn't give the feed yet</b> <span style='color:var(--mut)'>(OpenAI: \"recommended attributes improve ranking, relevance, and user trust\")</span></p><ul style='margin:0;color:var(--mut)'>"
+                + "".join(f"<li>{_html.escape(FIELD_WHY.get(m, m))}</li>" for m in missing[:10]) + "</ul>")
+    dom = _html.escape(rep["domain"]); em = _html.escape(email)
     body = ("<div class='wrap'><div class='card' style='margin-top:44px'>"
             "<div style='color:#0a7d3c;font-weight:700;font-size:12px'>YOUR FEED IS BUILT &middot; LIVE</div>"
-            f"<h2 style='margin:.2em 0'>{_html.escape(rep['domain'])}</h2>"
-            f"<p style='font-size:1.05em'>We just generated your <b>submission-ready OpenAI product feed</b> &mdash; {rep.get('feed_rows')} items, to spec, hosted and auto-refreshing:</p>"
+            f"<h2 style='margin:.2em 0'>{dom}</h2>"
+            f"<p style='font-size:1.05em'>We just generated your <b>OpenAI-spec product feed</b> &mdash; {rep.get('feed_rows')} rows, validated, hosted:</p>"
             f"<p><code style='font-size:.9em'>{fb}</code></p>"
-            f"<table style='width:100%;border-collapse:collapse;font-size:.92em'>{rows}</table></div>"
-            "<div class='card cta'><h3>Next: we put it to work</h3>"
-            "<p>Feed hosting + auto-refresh, crawler access, your ChatGPT merchant application handled &mdash; and agent checkout when your approval lands. That's the service.</p>"
-            f"<a class='btn' href='mailto:mahmood@canaishopyou.com?subject=Launch%20{_html.escape(rep['domain'])}%20into%20AI%20shopping'>Launch my store &rarr;</a></div>"
+            f"<table style='width:100%;border-collapse:collapse;font-size:.92em'>{rows}</table>{gaps}</div>"
+            "<div class='card cta'><h3>Launch: we fill the gaps, file your application, host the feed</h3>"
+            f"<p>We rebuild {dom}'s feed to the full spec (category, dimensions, shipping, returns, Q&amp;A, variants), fix what blocks you on the store, prepare and file your ChatGPT merchant application with you, and host the daily snapshot OpenAI ingests. "
+            f"<b>${PRICE_SETUP} one-time</b>, then <b>${PRICE_MONTH}/mo</b> hosting once your feed is live. Full refund if we can't get your feed spec-clean.</p>"
+            f"<form method='post' action='/buy' style='display:flex;gap:10px;max-width:460px;margin:0 auto;flex-wrap:wrap;justify-content:center'>"
+            f"<input type='hidden' name='domain' value='{dom}'><input name='email' type='email' value='{em}' required style='flex:1;min-width:220px'>"
+            f"<button>Launch {dom} &mdash; ${PRICE_SETUP} &rarr;</button></form>"
+            "<p style='font-size:.8em;opacity:.8;margin-top:8px'>Secure checkout by Stripe. Questions first? <a href='mailto:mahmood@canaishopyou.com' style='color:#fff'>mahmood@canaishopyou.com</a></p></div>"
             "<p style='text-align:center'><a href='/'>&larr; back</a></p></div>")
+    return render_template_string(BASE_DOC, body=body)
+
+# ----------------------------------------------------------------------------- paid launch (Stripe Checkout)
+PRICE_SETUP = int(os.environ.get("PRICE_SETUP", "199"))
+PRICE_MONTH = int(os.environ.get("PRICE_MONTH", "29"))
+
+def _stripe_key():
+    return os.environ.get("STRIPE_SECRET_KEY")
+
+@app.route("/buy", methods=["POST"])
+def buy():
+    f = request.form
+    domain = re.sub(r"^https?://", "", (f.get("domain", "")).strip().lower()).split("/")[0]
+    email = (f.get("email", "")).strip()
+    if not (domain and email):
+        return redirect("/")
+    try: log_lead(domain, "", email, extra="clicked buy", kind="buy")
+    except Exception: pass
+    key = _stripe_key()
+    if not key:
+        return render_template_string(BASE_DOC, body=(
+            "<div class='wrap'><div class='card cta' style='margin-top:50px'><h3>Checkout opens shortly</h3>"
+            f"<p>We've saved <b>{_html.escape(domain)}</b> and will email <b>{_html.escape(email)}</b> a secure payment link within 24 hours to launch your store.</p>"
+            "<a class='btn' href='/'>&larr; Back</a></div></div>"))
+    base = os.environ.get("PUBLIC_BASE", "https://canaishopyou.com")
+    data = {
+        "mode": "subscription", "customer_email": email,
+        "success_url": f"{base}/thanks?sid={{CHECKOUT_SESSION_ID}}", "cancel_url": f"{base}/",
+        "line_items[0][quantity]": "1", "line_items[0][price_data][currency]": "usd",
+        "line_items[0][price_data][unit_amount]": str(PRICE_SETUP * 100),
+        "line_items[0][price_data][product_data][name]": f"ChatGPT Shopping launch — {domain}",
+        "line_items[0][price_data][product_data][description]": "Feed rebuilt to the full OpenAI spec, store fixes, merchant application prepared and filed with you, checkout endpoint ready.",
+        "line_items[1][quantity]": "1", "line_items[1][price_data][currency]": "usd",
+        "line_items[1][price_data][unit_amount]": str(PRICE_MONTH * 100),
+        "line_items[1][price_data][recurring][interval]": "month",
+        "line_items[1][price_data][product_data][name]": f"Feed hosting & monitoring — {domain}",
+        "subscription_data[trial_period_days]": "30",   # hosting starts billing once the feed is live (~30 days)
+        "subscription_data[metadata][domain]": domain,
+        "metadata[domain]": domain, "metadata[email]": email,
+        "allow_promotion_codes": "true", "billing_address_collection": "auto",
+    }
+    try:
+        r = requests.post("https://api.stripe.com/v1/checkout/sessions", data=data, auth=(key, ""), timeout=30)
+        j = r.json()
+        if r.status_code == 200 and j.get("url"):
+            return redirect(j["url"], code=303)
+        import sys as _s; print(f"[buy] stripe error {r.status_code}: {j}", file=_s.stderr)
+    except Exception as e:
+        import sys as _s; print(f"[buy] stripe unreachable: {e}", file=_s.stderr)
+    return render_template_string(BASE_DOC, body=(
+        "<div class='wrap'><div class='card cta' style='margin-top:50px'><h3>Payment page unavailable right now</h3>"
+        f"<p>We've saved <b>{_html.escape(domain)}</b>. We'll email <b>{_html.escape(email)}</b> a secure payment link within 24 hours.</p>"
+        "<a class='btn' href='/'>&larr; Back</a></div></div>"))
+
+@app.route("/thanks")
+def thanks():
+    sid = request.args.get("sid", "")
+    key = _stripe_key()
+    domain, email, paid = "", "", False
+    if sid and key and re.match(r"^cs_[A-Za-z0-9_]+$", sid):
+        try:
+            j = requests.get(f"https://api.stripe.com/v1/checkout/sessions/{sid}", auth=(key, ""), timeout=20).json()
+            paid = j.get("payment_status") == "paid" or j.get("status") == "complete"
+            domain = (j.get("metadata") or {}).get("domain", ""); email = j.get("customer_email") or (j.get("customer_details") or {}).get("email", "")
+        except Exception: pass
+    if paid and domain:
+        try:
+            log_lead(domain, "", email, extra=f"PAID ${PRICE_SETUP} + ${PRICE_MONTH}/mo (session {sid})", kind="paid")
+            d = _load(); custs = d.setdefault("customers", {})
+            custs[domain] = {"email": email, "session": sid, "ts": _utcnow(), "status": "launch_paid"}
+            fb_list = d.setdefault("feeds_built", [])
+            if domain not in fb_list: fb_list.append(domain)
+            _save(d)
+        except Exception: pass
+        try:  # build the feed now so the customer sees it live on the thank-you page
+            if _fe and not os.path.exists(os.path.join(FEEDS_DIR, f"{domain}.tsv")):
+                _fe.run(domain, outdir=FEEDS_DIR)
+        except Exception: pass
+    dom = _html.escape(domain or "your store")
+    body = ("<div class='wrap'><div class='card' style='margin-top:44px'>"
+            + ("<div style='color:#0a7d3c;font-weight:700;font-size:12px'>PAYMENT RECEIVED</div>" if paid else "<div style='color:#b3261e;font-weight:700;font-size:12px'>PAYMENT NOT CONFIRMED</div>")
+            + f"<h2 style='margin:.2em 0'>{'Welcome aboard, ' + dom if paid else 'Something went wrong'}</h2>"
+            + (f"<p>Here's what happens next, and when:</p><ol>"
+               f"<li><b>Within 24 hours:</b> we rebuild {dom}'s feed to the full spec and email you the validation report and the exact data we still need from you (usually shipping terms and return policy).</li>"
+               f"<li><b>Within 3 business days:</b> store fixes applied, feed hosted at <code>https://canaishopyou.com/feeds/{dom}.tsv.gz</code>, your merchant application drafted for you to review and submit at chatgpt.com/merchants (we fill everything; you press submit because it's your company).</li>"
+               f"<li><b>On approval:</b> OpenAI assigns an SFTP location; we push your daily snapshot from then on and monitor it. Hosting billing starts then, not before.</li>"
+               f"<li><b>Optional:</b> agent checkout &mdash; set up in 10 minutes at <a href='/acp/onboard'>/acp/onboard</a> whenever you want it.</li></ol>"
+               f"<p>Reply to your receipt email any time; a human (Mahmood) answers.</p>" if paid else
+               "<p>We couldn't confirm the payment. If your card was charged, email <a href='mailto:mahmood@canaishopyou.com'>mahmood@canaishopyou.com</a> with your receipt and we'll sort it immediately.</p>")
+            + "</div><p style='text-align:center'><a href='/'>&larr; home</a></p></div>")
     return render_template_string(BASE_DOC, body=body)
 
 @app.route("/feeds/<path:fname>")
