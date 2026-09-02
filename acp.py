@@ -72,22 +72,40 @@ def _m(slug):
     return merchants().get(slug)
 
 # ----------------------------------------------------------------------------- OpenAI egress allowlist + rate limit
-_ip_cache = {"nets": [], "at": 0}
+_ip_cache = {"nets": [], "at": 0, "refreshing": False}
+_ip_lock = threading.Lock()
 
-def _openai_nets():
+def _refresh_openai_nets():
+    try:
+        d = requests.get("https://openai.com/chatgpt-connectors.json", headers=UA, timeout=10).json()
+        nets = []
+        for p in d.get("prefixes", []):
+            for k in ("ipv4Prefix", "ipv6Prefix"):
+                if p.get(k):
+                    nets.append(ipaddress.ip_network(p[k], strict=False))
+        if nets:
+            _ip_cache.update(nets=nets, at=_now())
+        else:
+            _ip_cache["at"] = _now() - 3000
+    except Exception:
+        _ip_cache["at"] = _now() - 3000  # retry in 10 min, keep old list
+    finally:
+        _ip_cache["refreshing"] = False
+
+def _openai_nets(block=False):
+    """Cached OpenAI egress prefixes; refreshed hourly off the request path (block=True only for tests/startup)."""
     if _now() - _ip_cache["at"] > 3600:
-        try:
-            d = requests.get("https://openai.com/chatgpt-connectors.json", headers=UA, timeout=10).json()
-            nets = []
-            for p in d.get("prefixes", []):
-                for k in ("ipv4Prefix", "ipv6Prefix"):
-                    if p.get(k):
-                        nets.append(ipaddress.ip_network(p[k], strict=False))
-            if nets:
-                _ip_cache.update(nets=nets, at=_now())
-        except Exception:
-            _ip_cache["at"] = _now() - 3000  # retry in 10 min, keep old list
+        with _ip_lock:
+            if not _ip_cache["refreshing"]:
+                _ip_cache["refreshing"] = True
+                if block:
+                    _refresh_openai_nets()
+                else:
+                    threading.Thread(target=_refresh_openai_nets, daemon=True).start()
     return _ip_cache["nets"]
+
+if ENFORCE_IP:
+    threading.Thread(target=_refresh_openai_nets, daemon=True).start()
 
 def _client_ip():
     return (request.headers.get("X-Forwarded-For", request.remote_addr or "")).split(",")[0].strip()
@@ -141,6 +159,10 @@ def init_db():
             attempts INTEGER DEFAULT 0, next_at REAL, delivered REAL);
         CREATE TABLE IF NOT EXISTS inbound (source TEXT, ext_id TEXT, received REAL, PRIMARY KEY (source, ext_id));
         """)
+        try:
+            c.execute("ALTER TABLE sessions ADD COLUMN drift INTEGER DEFAULT 0")  # totals changed; needs an update before complete
+        except sqlite3.OperationalError:
+            pass
 
 init_db()
 
@@ -183,7 +205,8 @@ def _on_acp_error(e):
 def _auth(slug):
     m = _m(slug)
     if not m:
-        raise ACPError(404, "merchant_not_found", "unknown merchant")
+        # same answer as a bad bearer, so merchant slugs can't be enumerated
+        raise ACPError(401, "unauthorized", "invalid bearer token")
     ip = _client_ip()
     if ENFORCE_IP and not _ip_allowed(ip):
         raise ACPError(403, "forbidden", "source address not in the ChatGPT egress allowlist")
@@ -338,11 +361,8 @@ class Woo:
              "country": (addr or {}).get("country", "US")}
         line_items = []
         for it in quote["_cart_items"]:
-            li = {"quantity": it["quantity"]}
-            if it["type"] == "variation":
-                li["variation_id"] = it["id"]; li["product_id"] = it.get("parent_id") or it["id"]
-            else:
-                li["product_id"] = it["id"]
+            # Woo REST resolves the parent product from variation_id itself; passing product_id=variation_id is wrong
+            li = {"quantity": it["quantity"], ("variation_id" if it["type"] == "variation" else "product_id"): it["id"]}
             line_items.append(li)
         body = {
             "status": "processing", "set_paid": True, "payment_method": "stripe",
@@ -412,8 +432,7 @@ def build_quote(m, cart, option_id=None):
             "item": {"id": str(it["id"]), "quantity": qty},
             "base_amount": base, "discount": max(base - sub, 0), "subtotal": sub, "tax": tax, "total": total,
         })
-        cart_items.append({"id": it["id"], "type": it["type"], "quantity": qty,
-                           "parent_id": (it.get("item_data") or [{}])[0].get("parent_id")})
+        cart_items.append({"id": it["id"], "type": it["type"], "quantity": qty})
     options, selected = [], None
     shipping_cfg = m.get("shipping", {})
     now = datetime.now(timezone.utc)
@@ -528,6 +547,8 @@ def session_view(m, s, quote, messages=None, order=None, include_provider=True):
 def _status_for(s, quote):
     if s["status"] in ("completed", "canceled", "in_progress"):
         return s["status"]
+    if s.get("drift"):
+        return "not_ready_for_payment"   # buyer hasn't seen the changed totals yet (cleared by the next update)
     sel = quote.get("_selected") or {}
     if sel.get("type") == "digital":
         return "ready_for_payment" if (s.get("buyer") or {}).get("email") else "not_ready_for_payment"
@@ -536,11 +557,11 @@ def _status_for(s, quote):
 # ----------------------------------------------------------------------------- session persistence
 def _save_session(s):
     with _db_lock, _db() as c:
-        c.execute("""INSERT OR REPLACE INTO sessions (id,merchant,status,cart_token,items,buyer,address,option_id,quote,quote_hash,order_id,created,updated)
-                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        c.execute("""INSERT OR REPLACE INTO sessions (id,merchant,status,cart_token,items,buyer,address,option_id,quote,quote_hash,order_id,created,updated,drift)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                   (s["id"], s["merchant"], s["status"], s["cart_token"], _j(s["items"]), _j(s.get("buyer")),
                    _j(s.get("address")), s.get("option_id"), _j(s["quote"]), s.get("quote_hash"), s.get("order_id"),
-                   s.get("created", _now()), _now()))
+                   s.get("created", _now()), _now(), 1 if s.get("drift") else 0))
 
 def _load_session(slug, sid):
     with _db() as c:
@@ -550,7 +571,7 @@ def _load_session(slug, sid):
     return {"id": r["id"], "merchant": r["merchant"], "status": r["status"], "cart_token": r["cart_token"],
             "items": json.loads(r["items"]), "buyer": json.loads(r["buyer"]), "address": json.loads(r["address"]),
             "option_id": r["option_id"], "quote": json.loads(r["quote"]), "quote_hash": r["quote_hash"],
-            "order_id": r["order_id"], "created": r["created"]}
+            "order_id": r["order_id"], "created": r["created"], "drift": bool(r["drift"]) if "drift" in r.keys() else False}
 
 def _requote(m, s):
     """Rebuild the Woo cart from the session's items/address/option and return a fresh quote."""
@@ -587,7 +608,7 @@ def _validate_items(items):
         if not isinstance(it, dict) or "id" not in it:
             raise ACPError(400, "missing", "items[].id is required", param=f"$.items[{i}].id")
         q = it.get("quantity", 1)
-        if not isinstance(q, int) or q <= 0:
+        if isinstance(q, bool) or not isinstance(q, int) or q <= 0:
             raise ACPError(400, "invalid", "items[].quantity must be a positive integer", param=f"$.items[{i}].quantity")
         try:
             int(str(it["id"]))
@@ -628,7 +649,7 @@ def update_session(slug, sid):
         return replay
     try:
         s = _load_session(slug, sid)
-        if s["status"] in ("completed", "canceled"):
+        if s["status"] in ("completed", "canceled", "in_progress"):
             raise ACPError(405, "invalid", f"session is {s['status']}")
         body = request.get_json(force=True, silent=True) or {}
         if "items" in body:
@@ -639,6 +660,7 @@ def update_session(slug, sid):
             s["address"] = body["fulfillment_address"]
         if "fulfillment_option_id" in body:
             s["option_id"] = body["fulfillment_option_id"]
+        s["drift"] = False   # the agent is fetching fresh totals, so they'll be shown before any complete
         q = _requote(m, s)
         msgs = []
         if body.get("fulfillment_option_id") and q["fulfillment_option_id"] != body["fulfillment_option_id"]:
@@ -688,6 +710,12 @@ def complete_session(slug, sid):
         if s["status"] == "completed":
             order = {"id": s["order_id"], "checkout_session_id": s["id"], "permalink_url": _permalink(slug, s["order_id"])}
             return _reply(slug, ep, key, 200, session_view(m, s, s["quote"], order=order, include_provider=False))
+        if s["status"] == "in_progress":
+            # payment already taken, store order still being created by the worker — never charge twice
+            order = {"id": s["id"], "checkout_session_id": s["id"], "permalink_url": _permalink(slug, s["id"])}
+            return _reply(slug, ep, key, 200, session_view(m, s, s["quote"], [{"type": "info", "code": "in_progress",
+                          "content_type": "plain", "content": "Payment received; the store is confirming your order."}],
+                          order=order, include_provider=False))
         if s["status"] == "canceled":
             raise ACPError(405, "invalid", "session is canceled")
         body = request.get_json(force=True, silent=True) or {}
@@ -701,12 +729,21 @@ def complete_session(slug, sid):
         # re-quote and refuse if anything drifted since the agent last saw the totals
         old_hash = s.get("quote_hash")
         q = _requote(m, s)
+        if s.get("drift"):
+            _save_session(s)
+            return _reply(slug, ep, key, 200, session_view(m, s, q, [{"type": "error", "code": "invalid", "param": "$.totals",
+                          "content_type": "plain", "content": "Totals changed; refresh the checkout (update) before paying."}],
+                          include_provider=False))
         if s["status"] != "ready_for_payment":
             _save_session(s)
             return _reply(slug, ep, key, 200, session_view(m, s, q, [{"type": "error", "code": "missing",
                           "param": "$.fulfillment_address", "content_type": "plain",
                           "content": "Shipping address and option are required before payment."}], include_provider=False))
         if old_hash and old_hash != s["quote_hash"]:
+            # totals drifted since the agent last showed them: refuse, and require an update call (which recomputes
+            # readiness) before any further complete — the buyer must see the new number first
+            s["drift"] = True
+            s["status"] = "not_ready_for_payment"
             _save_session(s)
             return _reply(slug, ep, key, 200, session_view(m, s, q, [{"type": "error", "code": "invalid", "param": "$.totals",
                           "content_type": "plain", "content": "Prices or availability changed; please review the updated totals."}],
@@ -744,6 +781,11 @@ def complete_session(slug, sid):
         return _reply(slug, ep, key, 200, session_view(m, s, q, order=order, include_provider=False))
     except ACPError:
         _idem_abort(slug, ep, key); raise
+    except Exception as e:
+        # transport/store failure BEFORE payment: release the idempotency key so a retry can succeed
+        import sys; print(f"[acp] complete {sid} failed pre-payment: {e}", file=sys.stderr)
+        _idem_abort(slug, ep, key)
+        raise ACPError(502, "invalid", f"store unavailable: {type(e).__name__}", etype="service_unavailable")
 
 # ----------------------------------------------------------------------------- Stripe
 def _stripe_charge(m, spt, amount, currency, session_id, email=None):
@@ -840,6 +882,10 @@ def _deliver(row):
     payload = json.loads(row["payload"])
     if row["event"] == "_retry_order":       # internal: finish an order whose store call failed at /complete
         s = _load_session(row["merchant"], payload["session_id"])
+        with _db() as c:
+            orow = c.execute("SELECT status FROM orders WHERE session_id=?", (s["id"],)).fetchone()
+        if orow and orow["status"] == "canceled":
+            return True   # refunded meanwhile (reconcile ?fix=1) — never create the store order after a refund
         w = Woo(m)
         o = w.find_order_by_session(s["id"]) or w.create_order(s, s["quote"], s.get("buyer"), s.get("address"), payload["pi"], s["quote"].get("_selected"))
         s["status"], s["order_id"] = "completed", str(o["id"])
@@ -857,6 +903,22 @@ def _deliver(row):
     r = requests.post(url, data=body, headers={**UA, "Content-Type": "application/json", "Merchant-Signature": sig,
                                                "Merchant_Name-Signature": sig, "Request-Id": str(uuid.uuid4())}, timeout=15)
     return 200 <= r.status_code < 300
+
+def _give_up_order(row):
+    """All retries to create the store order failed: refund the PaymentIntent, cancel the session, notify OpenAI."""
+    m = _m(row["merchant"]); payload = json.loads(row["payload"])
+    with _db() as c:
+        o = c.execute("SELECT * FROM orders WHERE session_id=?", (payload["session_id"],)).fetchone()
+    if not o or o["status"] == "canceled":
+        return
+    res = {"id": "re_mock"} if (o["stripe_pi"] or "").startswith("pi_mock_") else stripe_refund(m, o["stripe_pi"])
+    import sys; print(f"[acp] gave up on order for {payload['session_id']}: refund {res.get('id')} {res.get('error')}", file=sys.stderr)
+    with _db_lock, _db() as c:
+        c.execute("UPDATE orders SET status='canceled', refunded=amount WHERE id=?", (o["id"],))
+        c.execute("UPDATE sessions SET status='canceled' WHERE id=?", (payload["session_id"],))
+    _queue(row["merchant"], "order_updated", {"type": "order_updated", "data": {"type": "order", "checkout_session_id": payload["session_id"],
+           "permalink_url": _permalink(row["merchant"], o["id"]), "status": "canceled",
+           "refunds": [{"type": "original_payment", "amount": o["amount"]}]}})
 
 _worker_started = False
 _worker_lock = threading.Lock()
@@ -886,6 +948,8 @@ def _worker():
                     else:
                         c.execute("UPDATE outbox SET attempts=attempts+1, next_at=? WHERE id=?",
                                   (_now() + min(3600, 30 * (2 ** row["attempts"])), row["id"]))
+                if not ok and row["event"] == "_retry_order" and row["attempts"] + 1 >= 12:
+                    _give_up_order(row)   # store never accepted the order: refund the buyer, tell OpenAI
         except Exception as e:
             import sys; print(f"[acp] worker error: {e}", file=sys.stderr)
         time.sleep(5)
@@ -1198,6 +1262,14 @@ def onboard_merchant(store_url, woo_ck=None, woo_cs=None, stripe_secret_key=None
     if contact_email:
         cfg["contact_email"] = contact_email
     slug = re.sub(r"[^a-z0-9]+", "", domain.split(".")[0]) or secrets.token_hex(4)
+    # never let onboarding overwrite a configured merchant or a different store that already owns this slug
+    merchants()   # ensure the static config is loaded before we look at it
+    if slug in (_MERCHANTS or {}):   # configured in env/file: onboarding may never touch it
+        checks["slug"] = {"ok": False, "error": "this store is managed by CanAIShopYou directly — contact us to change its keys"}
+        return (slug, None), checks
+    existing = _runtime_merchants().get(slug)
+    if existing and existing.get("store_url") != store_url:   # different store, same first label
+        slug = slug + "-" + hashlib.sha1(domain.encode()).hexdigest()[:6]
     ready = checks["store_api"].get("ok") and checks["policies"]["ok"]
     return (slug, cfg) if ready else (slug, None), checks
 
