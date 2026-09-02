@@ -7,7 +7,8 @@ Implements the OpenAI product feed specification (developers.openai.com/commerce
   - checkout gate:   seller_privacy_policy + seller_tos URLs must resolve
   - formats:         .tsv + .csv.gz (UTF-8, lowercase underscore headers, one variant per row)
 
-Adapters: Shopify (public /products.json — zero-friction onboarding), WooCommerce (REST keys).
+Adapters: Shopify (public /products.json), WooCommerce Store API (public, keyless — every Woo >= 3.6),
+          WooCommerce REST (merchant keys, fallback for stores that disable the Store API).
 CLI:  python3 feed_engine.py <domain>   -> writes feeds/<domain>.tsv + .csv.gz + report JSON
 """
 import csv, gzip, io, json, re, sys, os
@@ -49,18 +50,51 @@ def shopify_currency(domain):
     return "USD", False  # assumed — flagged in report
 
 
-def shopify_policies(domain):
-    """Discover the two URLs that gate checkout eligibility."""
+POLICY_PATHS = {
+    "seller_privacy_policy": ("/policies/privacy-policy", "/privacy-policy/", "/privacy/", "/privacy-policy"),
+    "seller_tos": ("/policies/terms-of-service", "/terms-of-service/", "/terms-and-conditions/",
+                   "/terms/", "/terms-of-service", "/terms-conditions/"),
+}
+POLICY_SLUGS = {"seller_privacy_policy": ("privacy",), "seller_tos": ("terms", "conditions")}
+
+
+def _resolve_page(url):
+    """Final URL of a real page (200, follows redirects — WordPress guesses permalinks), else None.
+    A redirect to the homepage is not a policy page."""
+    try:
+        r = requests.get(url, headers=UA, timeout=10, allow_redirects=True)
+        if r.status_code != 200:
+            return None
+        final = r.url
+        if final.rstrip("/").count("/") <= 2:  # https://host or https://host/ -> homepage
+            return None
+        return final
+    except Exception:
+        return None
+
+
+def discover_policies(domain):
+    """Discover the two URLs that gate checkout eligibility (Shopify paths, then Woo/WP paths, then WP pages API)."""
     found = {}
-    for key, path in (("seller_privacy_policy", "/policies/privacy-policy"),
-                      ("seller_tos", "/policies/terms-of-service")):
-        try:
-            r = requests.get(f"https://{domain}{path}", headers=UA, timeout=10, allow_redirects=True)
-            if r.status_code == 200:
-                found[key] = f"https://{domain}{path}"
-        except Exception:
-            pass
+    for key, paths in POLICY_PATHS.items():
+        for path in paths:
+            final = _resolve_page(f"https://{domain}{path}")
+            if final:
+                found[key] = final
+                break
+    missing = [k for k in POLICY_PATHS if k not in found]
+    if missing:
+        pages = _get(f"https://{domain}/wp-json/wp/v2/pages?per_page=100&_fields=slug,link") or []
+        for key in missing:
+            for pg in pages if isinstance(pages, list) else []:
+                slug = (pg.get("slug") or "").lower()
+                if any(s in slug for s in POLICY_SLUGS[key]) and pg.get("link"):
+                    found[key] = pg["link"]
+                    break
     return found
+
+
+shopify_policies = discover_policies  # back-compat name
 
 
 def pull_shopify(domain, max_pages=4):
@@ -101,6 +135,73 @@ def pull_woocommerce(domain, ck, cs, max_pages=10):
             }],
         })
     return out
+
+
+def _minor(amount, unit):
+    """Store API prices are integer strings in minor units ('2900', unit 2) -> '29.00'."""
+    try:
+        return f"{int(amount) / (10 ** int(unit)):.{int(unit)}f}"
+    except (TypeError, ValueError):
+        return "0"
+
+
+def pull_woo_store(domain, max_pages=10, max_variations=400):
+    """WooCommerce Store API (public, no keys — ships with every Woo >= 3.6).
+    Returns (products in Shopify-ish shape, currency or None)."""
+    products, currency = [], None
+    for page in range(1, max_pages + 1):
+        data = _get(f"https://{domain}/wp-json/wc/store/v1/products?per_page=100&page={page}")
+        if not data or not isinstance(data, list):
+            break
+        products += data
+        if len(data) < 100:
+            break
+    products = [p for p in products if p.get("is_purchasable", True) and not p.get("is_password_protected")]
+    # per-variation price/SKU/stock needs one call each — fetch them concurrently (a cold Render
+    # instance must answer the crawler well inside its timeout)
+    var_ids = [v["id"] for p in products for v in (p.get("variations") or [])][:max_variations]
+    details = {}
+    if var_ids:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            for vid, det in zip(var_ids, ex.map(lambda i: _get(f"https://{domain}/wp-json/wc/store/v1/products/{i}"), var_ids)):
+                details[vid] = det
+    out = []
+    for p in products:
+        pr = p.get("prices") or {}
+        unit = pr.get("currency_minor_unit", 2)
+        currency = currency or pr.get("currency_code")
+        opt_names = [a.get("name") for a in p.get("attributes", []) if a.get("has_variations") and a.get("name")]
+        variants = []
+        for v in p.get("variations") or []:
+            detail = details.get(v["id"])
+            dpr = (detail or {}).get("prices") or pr
+            attrs = {a.get("name"): a.get("value") for a in v.get("attributes", []) if a.get("name")}
+            var = {
+                "id": v["id"], "title": ", ".join(attrs.get(n, "") for n in opt_names if attrs.get(n)) or "Default Title",
+                "price": _minor(dpr.get("sale_price") or dpr.get("price"), unit),
+                "compare_at_price": _minor(dpr.get("regular_price"), unit) if dpr.get("regular_price") else None,
+                "sku": (detail or {}).get("sku") or "", "barcode": "",
+                "available": (detail or {}).get("is_in_stock", p.get("is_in_stock", True)),
+            }
+            for i, n in enumerate(opt_names):
+                var[f"option{i+1}"] = attrs.get(n)
+            variants.append(var)
+        if not variants:
+            variants = [{
+                "id": p["id"], "title": "Default Title",
+                "price": _minor(pr.get("sale_price") or pr.get("price"), unit),
+                "compare_at_price": _minor(pr.get("regular_price"), unit) if pr.get("regular_price") else None,
+                "sku": p.get("sku") or "", "barcode": "", "available": p.get("is_in_stock", True),
+            }]
+        out.append({
+            "id": p["id"], "title": p.get("name", ""), "handle": p.get("slug", ""),
+            "body_html": p.get("description") or p.get("short_description") or "",
+            "vendor": "", "_url": p.get("permalink"),
+            "images": [{"src": i.get("src")} for i in p.get("images", []) if i.get("src")],
+            "options": [{"name": n} for n in opt_names], "variants": variants,
+        })
+    return out, currency
 
 
 def build_rows(domain, products, brand_name, currency, policies):
@@ -184,18 +285,21 @@ def write_feed(domain, rows, outdir="feeds"):
 def run(domain, brand_name=None, woo_keys=None, outdir="feeds"):
     domain = re.sub(r"^https?://", "", domain.strip().lower()).split("/")[0]
     brand_name = brand_name or domain.split(".")[0].replace("-", " ").title()
-    if woo_keys:
-        products = pull_woocommerce(domain, *woo_keys)
-        currency, cur_detected = "USD", False
-        platform = "woocommerce"
-    else:
-        products = pull_shopify(domain)
+    products, platform = pull_shopify(domain), "shopify"
+    currency, cur_detected = ("USD", False)
+    if products:
         currency, cur_detected = shopify_currency(domain)
-        platform = "shopify"
+    else:
+        products, cur = pull_woo_store(domain)  # public Store API — no keys needed
+        platform = "woocommerce"
+        if cur:
+            currency, cur_detected = cur, True
+        if not products and woo_keys:
+            products = pull_woocommerce(domain, *woo_keys)
     if not products:
         return {"ok": False, "domain": domain,
-                "reason": "no public catalog found (not Shopify? connect WooCommerce keys or upload CSV)"}
-    policies = shopify_policies(domain)
+                "reason": "no public catalog found (not Shopify or WooCommerce? connect API keys or upload CSV)"}
+    policies = discover_policies(domain)
     rows, issues, checkout_ok = build_rows(domain, products, brand_name, currency, policies)
     tsv, gz = write_feed(domain, rows, outdir)
     report = {

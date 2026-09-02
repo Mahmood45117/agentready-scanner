@@ -1,0 +1,22 @@
+{
+  "ok": true,
+  "domain": "linealprints.com",
+  "platform": "woocommerce",
+  "products": 8,
+  "feed_rows": 32,
+  "files": {
+    "tsv": "feeds/linealprints.com.tsv",
+    "csv_gz": "feeds/linealprints.com.csv.gz"
+  },
+  "currency": "USD",
+  "currency_detected": true,
+  "search_eligible": true,
+  "checkout_eligible": true,
+  "checkout_blockers": [],
+  "data_quality": {
+    "no_identifier": 0,
+    "no_image": 0,
+    "no_description": 0,
+    "truncated_title": 0
+  }
+}

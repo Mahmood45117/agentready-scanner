@@ -950,6 +950,10 @@ def connect():
                 "<a class='btn' href='mailto:mahmood@canaishopyou.com?subject=Connect%20" + _html.escape(domain) + "'>Connect my store &rarr;</a></div>"
                 "<p style='text-align:center'><a href='/'>&larr; back</a></p></div>")
         return render_template_string(BASE_DOC, body=body)
+    try:  # remember every catalog we built so the hosted feed can self-rebuild after a redeploy
+        d = _load(); fb_list = d.setdefault("feeds_built", [])
+        if rep["domain"] not in fb_list: fb_list.append(rep["domain"]); d["feeds_built"] = fb_list[-500:]; _save(d)
+    except Exception: pass
     q = rep.get("data_quality", {})
     blockers = rep.get("checkout_blockers", [])
     fb = f"https://canaishopyou.com/feeds/{rep['domain']}.csv.gz"
@@ -988,15 +992,31 @@ def serve_feed(fname):
         d = _load(); d.setdefault("feed_fetches", []).append({"f": fname, "ua": ua[:120], "ts": _utcnow()})
         d["feed_fetches"] = d["feed_fetches"][-2000:]; _save(d)
     except Exception: pass
+    fpath = os.path.join(FEEDS_DIR, fname)
+    dom = fname.rsplit(".csv.gz", 1)[0].rsplit(".tsv", 1)[0]
+    if _fe and not os.path.exists(fpath) and _feed_managed(dom):
+        # Render's disk is ephemeral: a redeploy wipes feeds/. Rebuild synchronously for domains we
+        # manage (env MANAGED_FEEDS) or have built via /connect, so the crawler never sees a 404.
+        try: _fe.run(dom, outdir=FEEDS_DIR)
+        except Exception:
+            import traceback, sys as _s; traceback.print_exc(file=_s.stderr)
     try:  # keep hosted feeds fresh: regenerate in the background if older than 6h
         import threading, time as _t
-        fpath = os.path.join(FEEDS_DIR, fname)
-        dom = fname.rsplit(".csv.gz", 1)[0].rsplit(".tsv", 1)[0]
         if _fe and os.path.exists(fpath) and _t.time() - os.path.getmtime(fpath) > int(os.environ.get("FEED_MAX_AGE", 21600)):
             os.utime(fpath, None)  # debounce concurrent fetches
             threading.Thread(target=lambda: _fe.run(dom, outdir=FEEDS_DIR), daemon=True).start()
     except Exception: pass
     return send_from_directory(FEEDS_DIR, fname)
+
+
+def _feed_managed(dom):
+    managed = {x.strip().lower() for x in os.environ.get("MANAGED_FEEDS", "linealprints.com").split(",") if x.strip()}
+    if dom in managed:
+        return True
+    try:
+        return dom in (_load().get("feeds_built") or [])
+    except Exception:
+        return False
 
 @app.route("/index-report")
 def index_report_legacy():
