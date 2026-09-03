@@ -13,14 +13,14 @@
     "shipping_free_over": "75.00 USD",
     "accepts_returns": "true",
     "accepts_exchanges": "false",
-    "return_deadline_in_days": "14",
+    "return_deadline_in_days": "30",
     "return_policy": "https://linealprints.com/returns-refunds/",
     "related_within_category": "part_of_set",
     "q_and_a": [
       {"q": "Does the print come framed?", "a": "No. Every print ships unframed with a 1/4 inch white border and is sized to fit a standard off-the-shelf frame (12x18, 16x24, 20x30 or 24x36 inches)."},
       {"q": "What paper is it printed on?", "a": "Museum-grade matte fine-art paper, 175 gsm, with archival pigment inks rated for decades without fading."},
       {"q": "How long does delivery take?", "a": "Each print is made to order in the USA in 2 to 5 business days, then ships tracked and arrives in 3 to 5 business days. US shipping is a flat $6.90 and free on orders over $75."},
-      {"q": "What if it arrives damaged?", "a": "Send a photo within 14 days and we reprint and reship it free of charge."},
+      {"q": "What if it arrives damaged?", "a": "Send a photo within 30 days of delivery and we reprint and reship it free of charge, or refund you in full."},
       {"q": "Are the colours accurate?", "a": "Series 01 is black ink on warm off-white paper; Balance and Orbit carry a muted rust-red accent and Meridian a deep navy. Printed colours match the product photos closely."}
     ]
   }
