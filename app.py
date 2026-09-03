@@ -20,14 +20,22 @@ except Exception:
     FINDINGS = {}
 DATA_FILE = os.environ.get("DATA_FILE", "/tmp/cani_data.json")
 BASELINE_SCANS = 41  # brands + tests already run by founder pre-launch
+import threading as _th
+_data_lock = _th.RLock()   # shared with acp.py (it picks up app._data_lock)
 def _load():
     try:
-        return _json.load(open(DATA_FILE))
+        with _data_lock:
+            return _json.load(open(DATA_FILE))
     except Exception:
         return {"scans": [], "leads": []}
 def _save(d):
     try:
-        _json.dump(d, open(DATA_FILE, "w"))
+        d["leads"] = d.get("leads", [])[-5000:]
+        with _data_lock:
+            tmp = f"{DATA_FILE}.{os.getpid()}.tmp"
+            with open(tmp, "w") as fh:
+                _json.dump(d, fh)
+            os.replace(tmp, DATA_FILE)
     except Exception:
         pass
 def log_scan(domain, score, grade):
@@ -794,7 +802,9 @@ INDEX_PAGE = """<!doctype html><html><head><title>Independent AI-Commerce Testin
 
 FOOT = ('<div class="foot">CanAIShopYou · the on-ramp to AI shopping · Multan, Pakistan<br>'
         '<a href="/get-into-chatgpt-shopping">ChatGPT Shopping guide</a> · <a href="/openai-product-feed-spec">Feed spec</a> · '
-        '<a href="/agentic-commerce-non-shopify">ACP guide</a> · <a href="/about">About</a> · <a href="/privacy">Privacy</a> · '
+        '<a href="/agentic-commerce-non-shopify">ACP guide</a> · <a href="/ai-shopping-surfaces-checklist">AI surfaces checklist</a> · '
+        '<a href="/google-merchant-center-woocommerce">Google Merchant Center</a> · <a href="/microsoft-merchant-center-copilot">Microsoft Merchant Center</a> · '
+        '<a href="/perplexity-merchant-program">Perplexity</a> · <a href="/about">About</a> · <a href="/privacy">Privacy</a> · '
         '<a href="/terms">Terms</a> · <a href="mailto:mahmood@canaishopyou.com">mahmood@canaishopyou.com</a></div>')
 
 def static_page(title, desc, hero_h1, hero_sub, body):
@@ -901,7 +911,7 @@ Enterprise users, and depends on OpenAI's relevance matching and policy approval
 <div class="card"><b>Your data and keys</b><br><span style="color:var(--mut)">
 To build feeds we read your store's public catalog. If you give us platform access, prefer manager or collaborator roles over
 passwords. If you choose the optional ACP checkout endpoint, you provide WooCommerce REST keys and a Stripe restricted key;
-these are stored encrypted at rest, used only to operate that endpoint, never shown again, and deleted on request. We do not
+these are stored with restricted access (encrypted at rest once our secrets key is configured), used only to operate that endpoint, never shown again, and deleted on request. We do not
 sell or share your data. See the privacy page.</span></div>
 
 <div class="card"><b>Acceptable use</b><br><span style="color:var(--mut)">
@@ -936,7 +946,7 @@ def _ai_test_retired():
     email  = (f.get("email", "")).strip()
     niche  = (f.get("niche", "")).strip()
     rivals = [x.strip() for x in (f.get("rivals", "")).split(",") if x.strip()]
-    ip = (request.headers.get("X-Forwarded-For", request.remote_addr or "")).split(",")[0].strip()
+    ip = _client_ip()
     if not (domain and email and niche):
         return render_template_string(BASE_DOC, body="<div class='wrap'><div class='card cta' style='margin-top:50px'><h3>One more thing</h3><p>Domain, email, and what you sell are all required to run the live test.</p><a class='btn' href='/'>← Back</a></div></div>")
     try: log_lead(domain, "", email, extra=f"category: {niche}", kind="ai-test")   # capture the lead no matter what
@@ -966,16 +976,33 @@ try:  # Agentic Checkout gateway — /acp/<merchant>/checkout_sessions… (see a
     app.register_blueprint(_acp.bp)
 except Exception:
     import traceback as _tb, sys as _sys2; _tb.print_exc(file=_sys2.stderr)
+    _acp = None
+from guides import bp as guides_bp, GUIDE_URLS; app.register_blueprint(guides_bp)  # SEO guide pages (guides.py)
 FEEDS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "feeds")
+
+def _client_ip():
+    """IP as seen by Render's proxy (rightmost X-Forwarded-For), never the client-controlled leftmost entry."""
+    if _acp is not None:
+        try: return _acp._client_ip()
+        except Exception: pass
+    xff = request.headers.get("X-Forwarded-For", "")
+    return (xff.split(",")[-1].strip() if xff else (request.remote_addr or "")) or ""
+
+def _public_domain(domain):
+    """True if domain is well-formed and resolves only to public addresses (no SSRF via /connect)."""
+    if not domain or _acp is None:
+        return bool(domain)
+    try: return bool(_acp._public_host(domain))
+    except Exception: return False
 
 @app.route("/connect", methods=["POST"])
 def connect():
     f = request.form
-    domain = re.sub(r"^https?://", "", (f.get("domain", "")).strip().lower()).split("/")[0]
+    domain = _clean_domain(f.get("domain", ""))
     email = (f.get("email", "")).strip()
-    if not (domain and email):
-        return render_template_string(BASE_DOC, body="<div class='wrap'><div class='card cta' style='margin-top:50px'><h3>One more thing</h3><p>Store domain and email are both required.</p><a class='btn' href='/'>&larr; Back</a></div></div>")
-    ip = (request.headers.get("X-Forwarded-For", request.remote_addr or "")).split(",")[0].strip()
+    if not (domain and email and _public_domain(domain)):
+        return render_template_string(BASE_DOC, body="<div class='wrap'><div class='card cta' style='margin-top:50px'><h3>One more thing</h3><p>A public store domain (e.g. yourstore.com) and your email are both required.</p><a class='btn' href='/'>&larr; Back</a></div></div>")
+    ip = _client_ip()
     try:
         d = _load(); now = _utcnow()
         recent = [x for x in d.get("connect_runs", []) if x.get("ip") == ip and now - x["ts"] < 3600]
@@ -1064,9 +1091,9 @@ def _stripe_key():
 @app.route("/buy", methods=["POST"])
 def buy():
     f = request.form
-    domain = re.sub(r"^https?://", "", (f.get("domain", "")).strip().lower()).split("/")[0]
+    domain = _clean_domain(f.get("domain", ""))
     email = (f.get("email", "")).strip()
-    if not (domain and email):
+    if not (domain and email and len(email) < 200 and re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email)):
         return redirect("/")
     plan = "ads" if f.get("plan") == "ads" else "launch"
     try: log_lead(domain, "", email, extra=f"clicked buy ({plan})", kind="buy")
@@ -1117,30 +1144,132 @@ def buy():
         f"<p>We've saved <b>{_html.escape(domain)}</b>. We'll email <b>{_html.escape(email)}</b> a secure payment link within 24 hours.</p>"
         "<a class='btn' href='/'>&larr; Back</a></div></div>"))
 
+# ----------------------------------------------------------------------------- customers: Stripe is the durable record
+# DATA_FILE lives on Render's ephemeral disk (wiped by every redeploy), so a paying customer is never trusted to it alone.
+# Every Checkout Session we create carries metadata[domain|email|plan]; /thanks and /admin/customers both derive the
+# customer record from the Stripe session object and merge it into DATA_FILE["customers"] (keyed by domain), so the
+# local copy self-heals from Stripe after a redeploy.
+import hmac as _hmac
+STRIPE_API = "https://api.stripe.com/v1"
+FEED_EXTS = ("tsv", "tsv.gz", "csv.gz", "google.tsv", "shopify.csv")
+
+def _admin_key_ok(given):
+    want = os.environ.get("ACP_ADMIN_KEY") or ""
+    return bool(want) and _hmac.compare_digest((given or "").encode(), want.encode())
+
+def _clean_domain(s):
+    s = re.sub(r"^https?://", "", (s or "").strip().lower()).split("/")[0]
+    return s if re.match(r"^[a-z0-9.-]{1,253}$", s) and ".." not in s else ""
+
+def _feed_files(domain):
+    """Which hosted feed files exist for this domain right now (disk check; ephemeral on Render)."""
+    return {ext: os.path.exists(os.path.join(FEEDS_DIR, f"{domain}.{ext}")) for ext in FEED_EXTS} if domain else {}
+
+def _session_paid(j):
+    """Setup fee paid, or (100% promo) nothing was due and the subscription is live."""
+    ps = j.get("payment_status")
+    if ps == "paid":
+        return True
+    sub = j.get("subscription") if isinstance(j.get("subscription"), dict) else {}
+    return ps == "no_payment_required" and j.get("status") == "complete" and sub.get("status") in ("active", "trialing")
+
+def _customer_from_session(j):
+    """Stripe checkout.session (subscription optionally expanded) -> our customer record. None if not ours/unpaid."""
+    md = j.get("metadata") or {}
+    domain = _clean_domain(md.get("domain"))
+    if not domain or not _session_paid(j):
+        return None
+    sub = j.get("subscription")
+    sub_obj = sub if isinstance(sub, dict) else {}
+    cust = j.get("customer")
+    plan = "ads" if md.get("plan") == "ads" else "launch"
+    email = md.get("email") or j.get("customer_email") or (j.get("customer_details") or {}).get("email") or ""
+    feeds = _feed_files(domain)
+    return {
+        "domain": domain, "email": email, "plan": plan, "status": f"{plan}_paid",
+        "session_id": j.get("id", ""),
+        "subscription_id": sub_obj.get("id") if sub_obj else (sub if isinstance(sub, str) else ""),
+        "customer_id": cust.get("id") if isinstance(cust, dict) else (cust or ""),
+        "amount_total": int(j.get("amount_total") or 0), "currency": (j.get("currency") or "usd").lower(),
+        "payment_status": j.get("payment_status") or "",
+        "subscription_status": sub_obj.get("status") or "",
+        "trial_end": sub_obj.get("trial_end") or None,
+        "ts": int(j.get("created") or _utcnow()),
+        "feeds": feeds, "feed_built": bool(feeds.get("tsv") or feeds.get("tsv.gz")),
+    }
+
+def _upsert_customer(d, rec):
+    """Merge one record into d['customers'] (keyed by domain). Returns True if this session is new to the file."""
+    custs = d.setdefault("customers", {})
+    if not isinstance(custs, dict):
+        custs = d["customers"] = {}
+    old = custs.get(rec["domain"]) or {}
+    old_sid = old.get("session_id") or old.get("session") or ""
+    new = old_sid != rec["session_id"]
+    if old and new and int(old.get("ts") or 0) > rec["ts"]:
+        # an older session re-surfaced (e.g. admin backfill): keep the newer record as primary, remember this one
+        prev = old.setdefault("previous_sessions", [])
+        if rec["session_id"] and rec["session_id"] not in prev: prev.append(rec["session_id"])
+        return False
+    merged = dict(old); merged.update(rec)
+    merged["recorded_ts"] = old.get("recorded_ts") or _utcnow()
+    merged.pop("session", None)
+    if old and new and old_sid and old_sid not in merged.setdefault("previous_sessions", []):
+        merged["previous_sessions"].append(old_sid)
+    custs[rec["domain"]] = merged
+    fb_list = d.setdefault("feeds_built", [])
+    if rec["domain"] not in fb_list: fb_list.append(rec["domain"])
+    return new
+
+def _stripe_get(path, key, params=None):
+    r = requests.get(f"{STRIPE_API}/{path}", params=params or {}, auth=(key, ""), timeout=30)
+    try:
+        j = r.json()
+    except Exception:
+        j = {}
+    if r.status_code != 200:
+        raise RuntimeError((j.get("error") or {}).get("message") or f"Stripe HTTP {r.status_code}")
+    return j
+
+def _stripe_list_paid_sessions(key, max_pages=20):
+    """All completed Checkout Sessions (subscription expanded), newest first. Raises RuntimeError with Stripe's message."""
+    out, after = [], None
+    for _ in range(max_pages):
+        params = {"limit": "100", "expand[]": "data.subscription"}
+        if after: params["starting_after"] = after
+        j = _stripe_get("checkout/sessions", key, params)
+        data = j.get("data") or []
+        out.extend(s for s in data if s.get("status") == "complete")
+        if not j.get("has_more") or not data:
+            break
+        after = data[-1].get("id")
+    return out
+
 @app.route("/thanks")
 def thanks():
+    # The only input honoured is `sid`; domain/email/plan come from Stripe's own record of the session.
     sid = request.args.get("sid", "")
     key = _stripe_key()
-    domain, email, paid, plan = "", "", False, "launch"
+    rec = None
     if sid and key and re.match(r"^cs_[A-Za-z0-9_]+$", sid):
         try:
-            j = requests.get(f"https://api.stripe.com/v1/checkout/sessions/{sid}", auth=(key, ""), timeout=20).json()
-            paid = j.get("payment_status") == "paid" or j.get("status") == "complete"
-            domain = (j.get("metadata") or {}).get("domain", ""); email = j.get("customer_email") or (j.get("customer_details") or {}).get("email", "")
-            plan = (j.get("metadata") or {}).get("plan", "launch")
-        except Exception: pass
-    if paid and domain:
-        try:
-            log_lead(domain, "", email, extra=f"PAID plan={plan} (session {sid})", kind="paid")
-            d = _load(); custs = d.setdefault("customers", {})
-            custs[domain] = {"email": email, "session": sid, "ts": _utcnow(), "status": f"{plan}_paid", "plan": plan}
-            fb_list = d.setdefault("feeds_built", [])
-            if domain not in fb_list: fb_list.append(domain)
-            _save(d)
-        except Exception: pass
+            rec = _customer_from_session(_stripe_get(f"checkout/sessions/{sid}", key, {"expand[]": "subscription"}))
+        except Exception as e:
+            import sys as _s; print(f"[thanks] stripe verify failed: {type(e).__name__}", file=_s.stderr)
+    paid = rec is not None
+    domain, plan = (rec["domain"], rec["plan"]) if paid else ("", "launch")
+    if paid:
         try:  # build the feed now so the customer sees it live on the thank-you page
             if _fe and not os.path.exists(os.path.join(FEEDS_DIR, f"{domain}.tsv")):
                 _fe.run(domain, outdir=FEEDS_DIR)
+        except Exception: pass
+        rec["feeds"] = _feed_files(domain); rec["feed_built"] = bool(rec["feeds"].get("tsv") or rec["feeds"].get("tsv.gz"))
+        try:  # idempotent: a refresh of /thanks updates the record but logs the paid lead only once
+            d = _load()
+            if _upsert_customer(d, rec):
+                d.setdefault("leads", []).append({"domain": domain, "score": "", "email": rec["email"],
+                                                  "extra": f"PAID plan={plan} (session {sid})", "kind": "paid", "ts": _utcnow()})
+            _save(d)
         except Exception: pass
     dom = _html.escape(domain or "your store")
     body = ("<div class='wrap'><div class='card' style='margin-top:44px'>"
@@ -1158,6 +1287,75 @@ def thanks():
             + "</div><p style='text-align:center'><a href='/'>&larr; home</a></p></div>")
     return render_template_string(BASE_DOC, body=body)
 
+def _fmt_ts(ts):
+    try:
+        return datetime.datetime.fromtimestamp(int(ts), datetime.timezone.utc).strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        return ""
+
+@app.route("/admin/customers")
+def admin_customers():
+    """Owner-only: who paid, straight from Stripe (durable), merged into DATA_FILE so the local copy self-heals.
+    404 (not 403) unless ?key= matches ACP_ADMIN_KEY, so the route never reveals itself."""
+    from flask import abort
+    if not _admin_key_ok(request.headers.get("X-Admin-Key") or request.args.get("key", "")):
+        abort(404)
+    key = _stripe_key()
+    err, from_stripe = "", []
+    if not key:
+        err = "STRIPE_SECRET_KEY is not set on this deploy; showing the local record only."
+    else:
+        try:
+            from_stripe = [r for r in (_customer_from_session(s) for s in _stripe_list_paid_sessions(key)) if r]
+        except Exception as e:
+            err = f"Stripe error: {str(e)[:300]}" if isinstance(e, RuntimeError) else f"Stripe unreachable ({type(e).__name__})."
+    d = _load()
+    try:
+        for rec in sorted(from_stripe, key=lambda r: r["ts"]):   # oldest first so the newest session wins per domain
+            _upsert_customer(d, rec)
+        if from_stripe:
+            _save(d)
+    except Exception: pass
+    custs = d.get("customers") if isinstance(d.get("customers"), dict) else {}
+    rows = []
+    for dom, c in custs.items():
+        c = dict(c); c.setdefault("domain", dom)
+        c["feeds"] = _feed_files(dom); c["feed_built"] = bool(c["feeds"].get("tsv") or c["feeds"].get("tsv.gz"))
+        rows.append(c)
+    rows.sort(key=lambda c: int(c.get("ts") or 0), reverse=True)
+    if request.args.get("format") == "json":
+        return Response(_json.dumps({"ok": not err, "error": err, "source": "stripe" if from_stripe else "local",
+                                     "count": len(rows), "customers": rows}, indent=1), mimetype="application/json")
+    def cell(v): return f"<td style='padding:7px 9px;border-bottom:1px solid var(--hair);white-space:nowrap'>{v}</td>"
+    def money(c):
+        a = c.get("amount_total"); cur = (c.get("currency") or "usd").upper()
+        return f"{cur} {int(a) / 100:,.2f}" if a not in (None, "") else "&mdash;"
+    def sub(c):
+        st = c.get("subscription_status") or ("&mdash;" if not c.get("subscription_id") else "?")
+        te = c.get("trial_end")
+        return _html.escape(str(st)) + (f"<br><span style='color:var(--mut);font-size:.85em'>trial ends {_fmt_ts(te)}</span>" if te else "")
+    trs = "".join(
+        "<tr>" + cell(_fmt_ts(c.get("ts")))
+        + cell(f"<b>{_html.escape(str(c.get('domain', '')))}</b>")
+        + cell(_html.escape(str(c.get("email") or "")))
+        + cell(_html.escape(str(c.get("plan") or "")))
+        + cell(money(c) + (f"<br><span style='color:var(--mut);font-size:.85em'>{_html.escape(str(c.get('payment_status') or ''))}</span>" if c.get("payment_status") else ""))
+        + cell(sub(c))
+        + cell("<span class='PASS'>yes</span>" if c.get("feed_built") else "<span class='WARN'>no</span>")
+        + cell(f"<code style='font-size:.8em'>{_html.escape(str(c.get('session_id') or ''))}</code>")
+        + "</tr>" for c in rows) or "<tr><td colspan='8' style='padding:14px;color:var(--mut)'>No paying customers yet.</td></tr>"
+    head = "".join(f"<th style='text-align:left;padding:7px 9px;border-bottom:2px solid var(--hair);font-size:.8em;color:var(--mut)'>{h}</th>"
+                   for h in ("Paid (UTC)", "Domain", "Email", "Plan", "Amount", "Subscription", "Feed built", "Session"))
+    note = (f"<p style='color:#b3261e'><b>{_html.escape(err)}</b></p>" if err else
+            f"<p style='color:var(--mut);font-size:.9em'>{len(from_stripe)} completed session(s) read from Stripe and merged into the local record.</p>")
+    body = ("<div class='wrap'><div class='card' style='margin-top:44px;max-width:none'>"
+            "<div style='color:#0a7d3c;font-weight:700;font-size:12px'>OWNER &middot; CUSTOMERS</div>"
+            f"<h2 style='margin:.2em 0'>{len(rows)} customer{'s' if len(rows) != 1 else ''}</h2>{note}"
+            f"<div style='overflow-x:auto'><table style='width:100%;border-collapse:collapse;font-size:.92em'><thead><tr>{head}</tr></thead><tbody>{trs}</tbody></table></div>"
+            "<p style='color:var(--mut);font-size:.85em;margin-top:12px'>Source of truth is Stripe; this page re-reads it on every load. Add <code>&amp;format=json</code> for the raw records.</p>"
+            "</div></div>")
+    return render_template_string(BASE_DOC, body=body)
+
 @app.route("/feeds/<path:fname>")
 def serve_feed(fname):
     from flask import send_from_directory, abort
@@ -1169,8 +1367,9 @@ def serve_feed(fname):
         d["feed_fetches"] = d["feed_fetches"][-2000:]; _save(d)
     except Exception: pass
     fpath = os.path.join(FEEDS_DIR, fname)
-    dom = fname.rsplit(".csv.gz", 1)[0].rsplit(".tsv", 1)[0]
-    if _fe and not os.path.exists(fpath) and _feed_managed(dom):
+    dom = re.sub(r"\.(google\.tsv|shopify\.csv|tsv\.gz|csv\.gz|tsv)$", "", fname)
+    if _fe and not os.path.exists(fpath) and _feed_managed(dom) and (
+            _acp is None or _acp._rate_ok(f"feedbuild:{dom}", limit=2, window=600)):
         # Render's disk is ephemeral: a redeploy wipes feeds/. Rebuild synchronously for domains we
         # manage (env MANAGED_FEEDS) or have built via /connect, so the crawler never sees a 404.
         try: _fe.run(dom, outdir=FEEDS_DIR)
@@ -1219,7 +1418,7 @@ def robots_txt():
 @app.route("/sitemap.xml")
 def sitemap_xml():
     pages = ["", "how-it-works", "about", "privacy", "terms",
-             "get-into-chatgpt-shopping", "openai-product-feed-spec", "agentic-commerce-non-shopify"]
+             "get-into-chatgpt-shopping", "openai-product-feed-spec", "agentic-commerce-non-shopify"] + [u.strip("/") for u in GUIDE_URLS]
     urls = "".join(f"<url><loc>https://canaishopyou.com/{p}</loc></url>" for p in pages)
     return Response('<?xml version="1.0" encoding="UTF-8"?>'
                     '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
@@ -1342,9 +1541,9 @@ def request_audit():
     except Exception: pass
     return render_template_string(BASE_DOC, body=(
         "<div class='wrap'><div class='card cta' style='margin-top:60px'>"
-        "<h3>Request received ✓</h3><p>Your full audit of <b>" + (domain or "your store") +
+        "<h3>Request received ✓</h3><p>Your full audit of <b>" + _html.escape(domain or "your store") +
         "</b> is queued. We\'ll email the 7-point report within 5 business days"
-        + ((" to <b>"+email+"</b>") if email else "") + ".</p>"
+        + ((" to <b>"+_html.escape(email)+"</b>") if email else "") + ".</p>"
         "<a class='btn' href='/'>← Back</a></div></div>"))
 
 REPORT_PAGE = """<!doctype html><html><head><title>{{r.domain}} — Independent AI-Commerce Test | CanAIShopYou</title>

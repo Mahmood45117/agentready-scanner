@@ -2,6 +2,7 @@
   "ok": true,
   "domain": "linealprints.com",
   "platform": "woocommerce",
+  "site_name": "Lineal Prints",
   "products": 8,
   "feed_rows": 32,
   "files": {
@@ -16,12 +17,21 @@
   "search_eligible": true,
   "checkout_eligible": true,
   "checkout_blockers": [],
+  "policies": {
+    "seller_privacy_policy": "https://linealprints.com/privacy-policy/",
+    "seller_tos": "https://linealprints.com/terms-of-service/",
+    "return_policy": "https://linealprints.com/returns-refunds/"
+  },
   "data_quality": {
     "no_identifier": 0,
     "no_image": 0,
     "no_description": 0,
     "truncated_title": 0,
-    "short_description": 0
+    "short_description": 0,
+    "skipped_no_image": 0,
+    "skipped_no_price": 0,
+    "skipped_no_title": 0,
+    "titles_recased": 0
   },
   "spec": {
     "errors": [],
@@ -54,5 +64,7 @@
       "review_count"
     ]
   },
-  "profile_applied": true
+  "profile_applied": true,
+  "notes": [],
+  "seconds": 13.6
 }

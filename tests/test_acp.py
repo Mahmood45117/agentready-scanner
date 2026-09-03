@@ -544,8 +544,11 @@ def _woo_post(client, payload, headers=None, raw=None):
     return client.post(f"/acp/{MERCHANT_SLUG}/webhooks/woo", data=data, headers=h)
 
 
-def test_woo_webhook_without_secret_is_accepted_and_maps_status(client, completed_session):
+def test_woo_webhook_without_secret_is_accepted_and_maps_status(client, completed_session, store):
+    """No webhook secret but merchant REST keys: the posted body only says *which* order changed; the status and
+    refunds are re-read from the store with the merchant keys."""
     sid, _ = completed_session
+    store.change_order(4242, status="completed")
     r = _woo_post(client, {"id": 4242, "status": "completed", "date_modified": "2026-09-02T12:00:00"})
     assert r.status_code == 200
     events = db_rows("SELECT event, payload FROM outbox ORDER BY id")
@@ -554,20 +557,23 @@ def test_woo_webhook_without_secret_is_accepted_and_maps_status(client, complete
     assert upd == {"type": "order_updated", "data": {"type": "order", "checkout_session_id": sid,
                    "permalink_url": acp._permalink(MERCHANT_SLUG, "4242"), "status": "fulfilled", "refunds": []}}
     assert db_rows("SELECT status FROM orders")[0]["status"] == "fulfilled"
+    assert ("GET", "/wp-json/wc/v3/orders/4242", None) in store.requests_log, "order re-read from the store"
 
 
 @pytest.mark.parametrize("woo_status,acp_status", [("processing", "confirmed"), ("on-hold", "manual_review"),
                                                    ("cancelled", "canceled"), ("shipped", "shipped"),
                                                    ("some-plugin-status", "confirmed")])
-def test_woo_webhook_status_mapping(client, completed_session, woo_status, acp_status):
+def test_woo_webhook_status_mapping(client, completed_session, store, woo_status, acp_status):
+    store.change_order(4242, status=woo_status)
     r = _woo_post(client, {"id": 4242, "status": woo_status, "date_modified": f"2026-09-02T12:00:00-{woo_status}"})
     assert r.status_code == 200
     upd = json.loads(db_rows("SELECT payload FROM outbox WHERE event='order_updated'")[0]["payload"])
     assert upd["data"]["status"] == acp_status
 
 
-def test_woo_webhook_signature_enforced_when_secret_configured(client, merchant, completed_session):
+def test_woo_webhook_signature_enforced_when_secret_configured(client, merchant, completed_session, store):
     merchant["woo_webhook_secret"] = "woo-secret"
+    store.change_order(4242, status="completed")
     payload = {"id": 4242, "status": "completed", "date_modified": "2026-09-02T12:00:00"}
     raw = json.dumps(payload)
     assert _woo_post(client, None, raw=raw).status_code == 401, "missing signature"
@@ -580,10 +586,10 @@ def test_woo_webhook_signature_enforced_when_secret_configured(client, merchant,
     assert json.loads(ev["payload"])["data"]["status"] == "fulfilled"
 
 
-def test_woo_webhook_refunds_are_mirrored_into_order_updated(client, completed_session):
+def test_woo_webhook_refunds_are_mirrored_into_order_updated(client, completed_session, store):
     sid, _ = completed_session
-    r = _woo_post(client, {"id": 4242, "status": "processing", "date_modified": "2026-09-02T13:00:00",
-                           "refunds": [{"id": 77, "reason": "damaged", "total": "-10.00"}]})
+    store.change_order(4242, refunds=[{"id": 77, "reason": "damaged", "total": "-10.00"}])
+    r = _woo_post(client, {"id": 4242, "status": "processing", "date_modified": "2026-09-02T13:00:00"})
     assert r.status_code == 200
     [ev] = db_rows("SELECT payload FROM outbox WHERE event='order_updated'")
     upd = json.loads(ev["payload"])
@@ -592,47 +598,75 @@ def test_woo_webhook_refunds_are_mirrored_into_order_updated(client, completed_s
     assert db_rows("SELECT refunded FROM orders")[0]["refunded"] == 1000
 
     # a second refund: cumulative total 1500 -> refunds[] reports the full refunded amount, ledger updated
-    r = _woo_post(client, {"id": 4242, "status": "processing", "date_modified": "2026-09-02T13:30:00",
-                           "refunds": [{"id": 77, "total": "-10.00"}, {"id": 78, "total": "-5.00"}]})
+    store.change_order(4242, refunds=[{"id": 77, "total": "-10.00"}, {"id": 78, "total": "-5.00"}])
+    r = _woo_post(client, {"id": 4242, "status": "processing", "date_modified": "2026-09-02T13:30:00"})
     assert r.status_code == 200
     evs = db_rows("SELECT payload FROM outbox WHERE event='order_updated' ORDER BY id")
     assert json.loads(evs[-1]["payload"])["data"]["refunds"] == [{"type": "original_payment", "amount": 1500}]
     assert db_rows("SELECT refunded FROM orders")[0]["refunded"] == 1500
 
-    # re-delivery with the same refunds (new date_modified) -> no new refund reported, ledger unchanged
-    r = _woo_post(client, {"id": 4242, "status": "processing", "date_modified": "2026-09-02T14:00:00",
-                           "refunds": [{"id": 77, "total": "-10.00"}, {"id": 78, "total": "-5.00"}]})
+    # re-delivery after an unrelated modification -> no new refund reported, ledger unchanged
+    store.change_order(4242, customer_note="gift wrap")
+    r = _woo_post(client, {"id": 4242, "status": "processing", "date_modified": "2026-09-02T14:00:00"})
     evs = db_rows("SELECT payload FROM outbox WHERE event='order_updated' ORDER BY id")
     assert json.loads(evs[-1]["payload"])["data"]["refunds"] == []
     assert db_rows("SELECT refunded FROM orders")[0]["refunded"] == 1500
 
 
-def test_woo_webhook_refund_on_mock_payment_does_not_call_stripe(client, completed_session, monkeypatch):
+def test_woo_webhook_refund_on_mock_payment_does_not_call_stripe(client, completed_session, store, monkeypatch):
     called = []
     monkeypatch.setattr(acp, "stripe_refund", lambda *a, **k: called.append(a))
-    _woo_post(client, {"id": 4242, "status": "refunded", "date_modified": "2026-09-02T15:00:00",
-                       "refunds": [{"id": 1, "total": "-45.90"}]})
+    store.change_order(4242, status="refunded", refunds=[{"id": 1, "total": "-45.90"}])
+    _woo_post(client, {"id": 4242, "status": "refunded", "date_modified": "2026-09-02T15:00:00"})
     assert called == [], "pi_mock_ intents must not hit Stripe"
     upd = json.loads(db_rows("SELECT payload FROM outbox WHERE event='order_updated'")[0]["payload"])
     assert upd["data"]["status"] == "canceled" and upd["data"]["refunds"] == [{"type": "original_payment", "amount": 4590}]
 
 
-def test_woo_webhook_refund_on_real_payment_mirrors_to_stripe(client, completed_session, monkeypatch):
+def test_woo_webhook_refund_on_real_payment_mirrors_to_stripe(client, completed_session, store, monkeypatch):
     with acp._db() as c:
         c.execute("UPDATE orders SET stripe_pi='pi_real_123'")
     called = []
     monkeypatch.setattr(acp, "stripe_refund", lambda m, pi, amount=None: called.append((pi, amount)) or {"id": "re_1"})
-    _woo_post(client, {"id": 4242, "status": "processing", "date_modified": "2026-09-02T15:00:00",
-                       "refunds": [{"id": 1, "total": "-10.00"}]})
+    store.change_order(4242, refunds=[{"id": 1, "total": "-10.00"}])
+    _woo_post(client, {"id": 4242, "status": "processing", "date_modified": "2026-09-02T15:00:00"})
     assert called == [("pi_real_123", 1000)]
 
 
-def test_woo_webhook_duplicate_delivery_is_ignored(client, completed_session):
+def test_woo_webhook_forged_refund_never_reaches_stripe(client, completed_session, store, monkeypatch):
+    """SECURITY: /webhooks/woo is unauthenticated when no woo_webhook_secret is set (Lineal's config). A forged
+    body claiming a refund must not trigger a Stripe refund — the store (which has no refund) is the truth."""
+    with acp._db() as c:
+        c.execute("UPDATE orders SET stripe_pi='pi_real_123'")
+    called = []
+    monkeypatch.setattr(acp, "stripe_refund", lambda m, pi, amount=None: called.append((pi, amount)) or {"id": "re_1"})
+    r = _woo_post(client, {"id": 4242, "status": "refunded", "date_modified": "2026-09-02T16:00:00",
+                           "refunds": [{"id": 1, "total": "-45.90"}]})
+    assert r.status_code == 200
+    assert called == [], "forged refund must not be mirrored to Stripe"
+    assert db_rows("SELECT status, refunded FROM orders")[0] == {"status": "confirmed", "refunded": 0}
+    evs = db_rows("SELECT payload FROM outbox WHERE event='order_updated'")
+    assert all(json.loads(e["payload"])["data"]["refunds"] == [] for e in evs)
+
+
+def test_woo_webhook_unsigned_without_keys_is_ignored(client, merchant, completed_session, store):
+    """No REST keys and no webhook secret: nothing in the body can be verified, so it is dropped."""
+    merchant.pop("woo_ck"); merchant.pop("woo_cs")
+    store.change_order(4242, status="completed")
+    r = _woo_post(client, {"id": 4242, "status": "completed", "date_modified": "2026-09-02T12:00:00"})
+    assert r.status_code == 200
+    assert db_rows("SELECT * FROM outbox WHERE event='order_updated'") == []
+    assert db_rows("SELECT status FROM orders")[0]["status"] == "created"
+
+
+def test_woo_webhook_duplicate_delivery_is_ignored(client, completed_session, store):
+    store.change_order(4242, status="completed")
     payload = {"id": 4242, "status": "completed", "date_modified": "2026-09-02T12:00:00"}
     assert _woo_post(client, payload).status_code == 200
     assert _woo_post(client, payload).status_code == 200
     assert len(db_rows("SELECT * FROM outbox WHERE event='order_updated'")) == 1
     # a genuinely new modification of the same order is processed
+    store.change_order(4242, status="completed", customer_note="x")
     assert _woo_post(client, dict(payload, date_modified="2026-09-02T12:00:01")).status_code == 200
     assert len(db_rows("SELECT * FROM outbox WHERE event='order_updated'")) == 2
 
@@ -725,14 +759,36 @@ def test_stripe_webhook_charge_refunded_records_woo_refund_and_emits_order_updat
     assert upd["data"]["status"] == "canceled" and upd["data"]["refunds"] == [{"type": "original_payment", "amount": 4590}]
 
 
-def test_stripe_webhook_dispute_puts_order_on_hold(client, completed_session, store):
+def test_stripe_webhook_dispute_puts_order_on_hold(client, merchant, completed_session, store):
+    merchant["stripe_webhook_secret"] = "whsec_test"
     pi = db_rows("SELECT stripe_pi FROM orders")[0]["stripe_pi"]
     ev = {"id": "evt_d1", "type": "charge.dispute.created", "data": {"object": {"id": "dp_1", "payment_intent": pi}}}
-    assert _stripe_post(client, ev).status_code == 200
+    assert _stripe_post(client, ev, secret="whsec_test").status_code == 200
     assert store.orders[4242]["status"] == "on-hold"
     assert db_rows("SELECT status FROM orders")[0]["status"] == "manual_review"
     upd = json.loads(db_rows("SELECT payload FROM outbox WHERE event='order_updated'")[-1]["payload"])
     assert upd["data"]["status"] == "manual_review"
+
+
+def test_stripe_webhook_unsigned_is_verified_against_stripe_or_dropped(client, merchant, completed_session, store):
+    """SECURITY: without stripe_webhook_secret an unsigned POST could put a store order on hold. The event must be
+    re-read from Stripe by id (merchant key) — and dropped entirely when there is no key or Stripe doesn't know it."""
+    pi = db_rows("SELECT stripe_pi FROM orders")[0]["stripe_pi"]
+    forged = {"id": "evt_forged", "type": "charge.dispute.created", "data": {"object": {"id": "dp_1", "payment_intent": pi}}}
+    # no stripe key on the merchant: ignored, no Stripe call, order untouched
+    assert _stripe_post(client, forged).status_code == 200
+    assert store.orders[4242]["status"] == "processing" and store.stripe_calls == []
+    assert db_rows("SELECT status FROM orders")[0]["status"] == "created"
+    # key present, Stripe has no such event: ignored
+    merchant["stripe_secret_key"] = "rk_test_x"
+    assert _stripe_post(client, forged).status_code == 200
+    assert store.stripe_calls == [("GET", "/v1/events/evt_forged", ("rk_test_x", ""))]
+    assert store.orders[4242]["status"] == "processing"
+    # a real event id: processed from Stripe's copy, not from the posted body
+    store.stripe_events["evt_real"] = {"id": "evt_real", "type": "charge.dispute.created", "data": {"object": {"id": "dp_2", "payment_intent": pi}}}
+    assert _stripe_post(client, {"id": "evt_real", "type": "charge.refunded", "data": {"object": {"payment_intent": pi, "amount_refunded": 4590}}}).status_code == 200
+    assert store.orders[4242]["status"] == "on-hold", "acted on Stripe's version (dispute), not the posted one (refund)"
+    assert db_rows("SELECT status, refunded FROM orders")[0] == {"status": "manual_review", "refunded": 0}
 
 
 def test_stripe_webhook_ignores_unknown_intent_and_ping(client, completed_session):
@@ -862,12 +918,7 @@ def test_boolean_quantity_rejected(api):
     assert st == 400 and body["param"] == "$.items[0].quantity"
 
 
-def test_onboarding_cannot_hijack_configured_merchant(monkeypatch):
-    monkeypatch.setattr(acp, "_openai_nets", lambda block=False: [])
-    monkeypatch.setattr(acp, "_store_policy_text", lambda *a, **k: "")
-    monkeypatch.setattr(acp, "_llm_shipping_map", lambda *a, **k: {})
-    import feed_engine
-    monkeypatch.setattr(feed_engine, "discover_policies", lambda d: {"seller_privacy_policy": "https://x/p", "seller_tos": "https://x/t"})
+def test_onboarding_cannot_hijack_configured_merchant(onboarding_env):
     slug_cfg, checks = acp.onboard_merchant(f"{MERCHANT_SLUG}.evil.example")
     slug, cfg = slug_cfg
     assert cfg is None and checks["slug"]["ok"] is False

@@ -106,6 +106,9 @@ class FakeWooStore:
         self.requests_log = []
         self.webhook_posts = []
         self.cron_pokes = 0
+        self.stripe_events = {}     # evt_id -> event JSON served by GET api.stripe.com/v1/events/<id>
+        self.stripe_calls = []      # (method, path, auth) for every api.stripe.com call
+        self.stripe_pis = []        # PaymentIntent creations (data + headers) when MOCK_PAY is off
 
     # ---- cart model -> Store API JSON
     def _price(self, pid):
@@ -235,7 +238,14 @@ class FakeWooStore:
             order.update({k: v for k, v in json_body.items()})
             order["date_modified"] = "2026-09-02T10:00:05"
             return FakeResponse(200, order)
+        if path == "/wp-json/wc/store/v1/products" and method == "GET":
+            return FakeResponse(200, [{"id": pid, "is_purchasable": True, "is_in_stock": p["stock"] > 0, "variations": []}
+                                      for pid, p in self.catalog.items()])
+        if path == "/wp-json/wp/v2/pages" and method == "GET":
+            return FakeResponse(200, [])
         if path == "/wp-json/wc/v3/orders" and method == "GET":
+            if auth != ("ck_test", "cs_test"):
+                return FakeResponse(401, {"code": "woocommerce_rest_cannot_view", "message": "Sorry, you cannot list resources."})
             needle = (params or {}).get("search") or (q.get("search") or [""])[0]
             found = [o for o in self.orders.values()
                      if any(md.get("value") == needle for md in o["meta_data"])]
@@ -251,7 +261,25 @@ class FakeWooStore:
         if u.netloc == "openai-webhooks.test":
             self.webhook_posts.append({"url": url, "headers": headers, "body": data})
             return FakeResponse(self.webhook_status, {"ok": True})
+        if u.netloc == "api.stripe.com":
+            self.stripe_calls.append((method, path, auth))
+            if method == "GET" and path.startswith("/v1/events/"):
+                ev = self.stripe_events.get(path.rsplit("/", 1)[1])
+                return FakeResponse(200, ev) if ev else FakeResponse(404, {"error": {"message": "No such event"}})
+            if method == "GET" and path == "/v1/account":
+                return FakeResponse(200, {"id": "acct_test", "country": "US", "charges_enabled": True})
+            if method == "POST" and path == "/v1/payment_intents":
+                self.stripe_pis.append({"data": data, "headers": headers})
+                return FakeResponse(200, {"id": f"pi_fake_{len(self.stripe_pis)}", "status": "succeeded"})
+            raise AssertionError(f"unexpected Stripe call {method} {path}")
         raise AssertionError(f"unexpected HTTP call {method} {url}")
+
+    # ---- helpers for tests: mutate the store the way WooCommerce would, then the webhook only *notifies*
+    def change_order(self, oid, **fields):
+        o = self.orders[oid]
+        o.update(fields)
+        o["date_modified"] = f"2026-09-02T{12 + len(self.requests_log) % 12:02d}:{len(self.requests_log) % 60:02d}:00"
+        return o
 
 
 class FakeSession:
@@ -400,3 +428,18 @@ def completed_session(api, ready_session):
 def db_rows(sql, *args):
     with acp._db() as c:
         return [dict(r) for r in c.execute(sql, args).fetchall()]
+
+
+@pytest.fixture
+def onboarding_env(monkeypatch, store, merchant):
+    """Onboarding without network: public DNS stubbed, policy discovery + LLM stubbed, fresh DATA_FILE."""
+    import ipaddress
+    monkeypatch.setattr(acp, "_openai_nets", lambda block=False: [])
+    monkeypatch.setattr(acp, "_resolve_host", lambda h: [ipaddress.ip_address("93.184.216.34")])
+    monkeypatch.setattr(acp, "_store_policy_text", lambda *a, **k: "")
+    monkeypatch.setattr(acp, "_llm_shipping_map", lambda *a, **k: {})
+    import feed_engine
+    monkeypatch.setattr(feed_engine, "discover_policies", lambda d: {"seller_privacy_policy": "https://x/p", "seller_tos": "https://x/t"})
+    df = os.path.join(tempfile.mkdtemp(prefix="acp-onboard-"), "data.json")
+    monkeypatch.setenv("DATA_FILE", df)
+    return df

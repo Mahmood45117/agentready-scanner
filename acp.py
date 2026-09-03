@@ -20,7 +20,7 @@ Permalink: /acp/o/<token> — email-gated order page (Woo has no login-free orde
 Spec: developers.openai.com/commerce/specs/checkout (API-Version 2025-09-12). See ../acp-gateway-design.md.
 Card data never touches this service (PCI: only spt_/pi_ ids and last4).
 """
-import base64, hashlib, hmac, ipaddress, json, os, re, secrets, sqlite3, threading, time, uuid
+import base64, hashlib, hmac, ipaddress, json, os, re, secrets, socket, sqlite3, threading, time, uuid
 from collections import deque
 from datetime import datetime, timedelta, timezone
 
@@ -37,6 +37,12 @@ TS_WINDOW = 300                # ±5 min Timestamp tolerance
 MOCK_PAY = os.environ.get("ACP_MOCK_PAYMENTS") == "1"   # local testing without Stripe
 ENFORCE_IP = os.environ.get("ACP_ENFORCE_IP") == "1"    # only accept session calls from OpenAI's published egress ranges
 RATE_LIMIT = int(os.environ.get("ACP_RATE_LIMIT", "120"))  # requests / minute / (merchant, ip)
+HEALTH_RATE = 30               # unauthenticated /health calls per minute per ip (each one hits the merchant's store)
+PERMALINK_RATE = 20            # email guesses per minute per ip on an order permalink
+ONBOARD_RATE_IP, ONBOARD_RATE_GLOBAL, ONBOARD_WINDOW = 5, 40, 3600   # onboarding = outbound crawl + an LLM call
+MAX_BODY = 256 * 1024          # bytes; every ACP request/webhook body is small JSON
+MAX_ITEMS, MAX_QTY, MAX_STR = 100, 999, 300
+CHARGE_LOCK_STALE = 120        # seconds before an in_progress session without a ledger row counts as a crashed charge
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 # ----------------------------------------------------------------------------- merchants
@@ -65,9 +71,77 @@ def merchants():
 
 def _runtime_merchants():
     try:
-        return json.load(open(os.environ.get("DATA_FILE", "/tmp/cani_data.json"))).get("acp_merchants", {})
+        raw = json.load(open(os.environ.get("DATA_FILE", "/tmp/cani_data.json"))).get("acp_merchants", {})
+        return {slug: _unseal(cfg) for slug, cfg in raw.items()} if isinstance(raw, dict) else {}
     except Exception:
         return {}
+
+# --- secrets at rest for runtime-onboarded merchants (Woo secret, Stripe key, bearer). Fernet when the `cryptography`
+# package and ACP_SECRETS_KEY (a Fernet key: `python3 -c "from cryptography.fernet import Fernet;print(Fernet.generate_key().decode())"`)
+# are present; otherwise plaintext, which the onboarding page then says out loud instead of claiming encryption.
+SEALED = ("woo_ck", "woo_cs", "stripe_secret_key", "bearer_key")
+_fernet_cache = {}
+
+def _fernet():
+    if "f" not in _fernet_cache:
+        f = None
+        k = os.environ.get("ACP_SECRETS_KEY")
+        if k:
+            try:
+                from cryptography.fernet import Fernet
+                f = Fernet(k.encode() if isinstance(k, str) else k)
+            except Exception as e:
+                import sys; print(f"[acp] ACP_SECRETS_KEY unusable ({type(e).__name__}); merchant keys stored in plaintext", file=sys.stderr)
+        _fernet_cache["f"] = f
+    return _fernet_cache["f"]
+
+def _seal(cfg):
+    f = _fernet()
+    if not f:
+        return dict(cfg)
+    out = dict(cfg)
+    for k in SEALED:
+        if isinstance(out.get(k), str) and not out[k].startswith("enc:"):
+            out[k] = "enc:" + f.encrypt(out[k].encode()).decode()
+    return out
+
+def _unseal(cfg):
+    if not isinstance(cfg, dict):
+        return cfg
+    out = dict(cfg)
+    f = _fernet()
+    for k in SEALED:
+        v = out.get(k)
+        if isinstance(v, str) and v.startswith("enc:"):
+            try:
+                out[k] = f.decrypt(v[4:].encode()).decode() if f else None
+            except Exception:
+                out[k] = None   # wrong/rotated key: the field is unusable, never a ciphertext-as-credential
+    return out
+
+def _persist_runtime_merchant(slug, cfg):
+    """Read-modify-write of DATA_FILE under app.py's data lock (when it has one) with an atomic replace, so a
+    concurrent lead/feed-fetch save in app.py can't drop the merchant and a crash can't leave half a file."""
+    df = os.environ.get("DATA_FILE", "/tmp/cani_data.json")
+    try:
+        import app as _app
+        lock = getattr(_app, "_data_lock", None)
+    except Exception:
+        lock = None
+    with (lock or _persist_lock):
+        try:
+            d = json.load(open(df)) if os.path.exists(df) else {}
+        except Exception:
+            d = {}
+        if not isinstance(d, dict):
+            d = {}
+        d.setdefault("acp_merchants", {})[slug] = _seal(cfg)
+        tmp = f"{df}.{os.getpid()}.{secrets.token_hex(4)}.tmp"
+        with open(tmp, "w") as fh:
+            json.dump(d, fh)
+        os.replace(tmp, df)
+
+_persist_lock = threading.Lock()
 
 def _m(slug):
     return merchants().get(slug)
@@ -109,7 +183,12 @@ if ENFORCE_IP:
     threading.Thread(target=_refresh_openai_nets, daemon=True).start()
 
 def _client_ip():
-    return (request.headers.get("X-Forwarded-For", request.remote_addr or "")).split(",")[0].strip()
+    """Address the platform proxy (Render) saw. Render appends the real client to X-Forwarded-For, so the RIGHTMOST
+    entry is trustworthy; the leftmost is whatever the client chose to send (spoofable -> rate-limit/IP-allowlist bypass)."""
+    xff = request.headers.get("X-Forwarded-For", "")
+    if xff:
+        return xff.split(",")[-1].strip()
+    return (request.remote_addr or "").strip()
 
 def _ip_allowed(ip):
     nets = _openai_nets()
@@ -124,13 +203,14 @@ def _ip_allowed(ip):
 _buckets = {}
 _buckets_lock = threading.Lock()
 
-def _rate_ok(key):
+def _rate_ok(key, limit=None, window=60):
     now = _now()
+    limit = RATE_LIMIT if limit is None else limit
     with _buckets_lock:
         q = _buckets.setdefault(key, deque())
-        while q and q[0] < now - 60:
+        while q and q[0] < now - window:
             q.popleft()
-        if len(q) >= RATE_LIMIT:
+        if len(q) >= limit:
             return False
         q.append(now)
         if len(_buckets) > 5000:  # crude GC
@@ -154,8 +234,9 @@ def init_db():
             order_id TEXT, created REAL, updated REAL);
         CREATE TABLE IF NOT EXISTS idem (merchant TEXT, key TEXT, endpoint TEXT, body_hash TEXT, status INTEGER,
             response TEXT, created REAL, PRIMARY KEY (merchant, key, endpoint));
-        CREATE TABLE IF NOT EXISTS orders (id TEXT PRIMARY KEY, merchant TEXT, session_id TEXT, woo_order_id TEXT,
-            stripe_pi TEXT, amount INTEGER, currency TEXT, status TEXT, email TEXT, refunded INTEGER DEFAULT 0, created REAL);
+        CREATE TABLE IF NOT EXISTS orders (id TEXT, merchant TEXT, session_id TEXT, woo_order_id TEXT,
+            stripe_pi TEXT, amount INTEGER, currency TEXT, status TEXT, email TEXT, refunded INTEGER DEFAULT 0, created REAL,
+            PRIMARY KEY (merchant, id));
         CREATE TABLE IF NOT EXISTS outbox (id INTEGER PRIMARY KEY AUTOINCREMENT, merchant TEXT, event TEXT, payload TEXT,
             attempts INTEGER DEFAULT 0, next_at REAL, delivered REAL);
         CREATE TABLE IF NOT EXISTS inbound (source TEXT, ext_id TEXT, received REAL, PRIMARY KEY (source, ext_id));
@@ -164,6 +245,17 @@ def init_db():
             c.execute("ALTER TABLE sessions ADD COLUMN drift INTEGER DEFAULT 0")  # totals changed; needs an update before complete
         except sqlite3.OperationalError:
             pass
+        # orders.id is the store's order number, which repeats across merchants (every Woo store has an order #4242):
+        # the ledger key must be (merchant, id) or one merchant's order silently replaces another's.
+        sql = (c.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='orders'").fetchone() or [""])[0] or ""
+        if "PRIMARY KEY (merchant, id)" not in sql:
+            c.executescript("""
+            ALTER TABLE orders RENAME TO orders_v1;
+            CREATE TABLE orders (id TEXT, merchant TEXT, session_id TEXT, woo_order_id TEXT, stripe_pi TEXT, amount INTEGER,
+                currency TEXT, status TEXT, email TEXT, refunded INTEGER DEFAULT 0, created REAL, PRIMARY KEY (merchant, id));
+            INSERT OR IGNORE INTO orders SELECT id,merchant,session_id,woo_order_id,stripe_pi,amount,currency,status,email,refunded,created FROM orders_v1;
+            DROP TABLE orders_v1;
+            """)
 
 init_db()
 
@@ -178,6 +270,28 @@ def _sid():
 
 def _j(x):
     return json.dumps(x, separators=(",", ":"), sort_keys=True)
+
+# ISO-4217 minor units (Stripe's zero- and three-decimal lists). The spec and Stripe both want ISO minor units;
+# WooCommerce's Store API instead reports amounts in the STORE's configured decimals (currency_minor_unit), which a
+# merchant can set to 0 or 3 for any currency — so amounts are normalised to ISO units in build_quote.
+_ZERO_DEC = {"BIF", "CLP", "DJF", "GNF", "JPY", "KMF", "KRW", "MGA", "PYG", "RWF", "UGX", "VND", "VUV", "XAF", "XOF", "XPF"}
+_THREE_DEC = {"BHD", "IQD", "JOD", "KWD", "LYD", "OMR", "TND"}
+
+def _minor_units(currency):
+    c = (currency or "USD").upper()
+    return 0 if c in _ZERO_DEC else 3 if c in _THREE_DEC else 2
+
+def _major(amount, currency):
+    """ISO minor units -> the decimal string WooCommerce REST expects ("6.90", "690" for JPY)."""
+    d = _minor_units(currency)
+    return f"{int(amount) / (10 ** d):.{d}f}"
+
+def _to_minor(major_str, currency):
+    """Woo REST decimal string ("-10.00") -> absolute ISO minor units; unparsable -> 0."""
+    try:
+        return abs(int(round(float(major_str) * (10 ** _minor_units(currency)))))
+    except (TypeError, ValueError):
+        return 0
 
 # ----------------------------------------------------------------------------- errors / responses
 class ACPError(Exception):
@@ -203,11 +317,17 @@ def _on_acp_error(e):
     return _error(e)
 
 # ----------------------------------------------------------------------------- request pipeline
+def _check_size():
+    """Reject oversized bodies before they are read (get_data would buffer the whole thing)."""
+    if (request.content_length or 0) > MAX_BODY:
+        raise ACPError(413, "invalid", f"request body larger than {MAX_BODY} bytes")
+
 def _auth(slug):
     m = _m(slug)
     if not m:
         # same answer as a bad bearer, so merchant slugs can't be enumerated
         raise ACPError(401, "unauthorized", "invalid bearer token")
+    _check_size()
     ip = _client_ip()
     if ENFORCE_IP and not _ip_allowed(ip):
         raise ACPError(403, "forbidden", "source address not in the ChatGPT egress allowlist")
@@ -230,14 +350,20 @@ def _auth(slug):
         raise ACPError(400, "invalid", f"unsupported API-Version {ver}; this endpoint speaks {API_VERSION}",
                        param="$.headers.API-Version")
     # Signature: algorithm/key exchange not published by OpenAI yet. Verify HMAC-SHA256 over raw body when a key is
-    # configured; fail closed only if ACP_REQUIRE_SIGNATURE=1.
+    # configured (a configured key with no header fails closed — otherwise omitting the header skips the check);
+    # without a key, require the header only if ACP_REQUIRE_SIGNATURE=1.
     sig, key = request.headers.get("Signature"), m.get("acp_signature_key")
-    if key and sig:
+    if key:
+        if not sig:
+            raise ACPError(401, "missing", "Signature header required", param="$.headers.Signature")
         want = base64.b64encode(hmac.new(key.encode(), request.get_data(), hashlib.sha256).digest()).decode()
         if not hmac.compare_digest(sig, want):
             raise ACPError(401, "invalid", "bad request signature", param="$.headers.Signature")
     elif os.environ.get("ACP_REQUIRE_SIGNATURE") == "1":
         raise ACPError(401, "missing", "Signature header required", param="$.headers.Signature")
+    ik = request.headers.get("Idempotency-Key")
+    if ik and len(ik) > 255:
+        raise ACPError(400, "invalid", "Idempotency-Key longer than 255 characters", param="$.headers.Idempotency-Key")
     return m
 
 def _idem_start(slug, endpoint):
@@ -372,7 +498,7 @@ class Woo:
             "billing": dict(a, email=(buyer or {}).get("email", ""), phone=(buyer or {}).get("phone_number", "") or ""),
             "shipping": a, "line_items": line_items,
             "shipping_lines": [{"method_id": option["_method_id"] or "flat_rate", "method_title": option["title"],
-                                "total": f"{option['total'] / 100:.2f}"}] if option and option.get("type") == "shipping" else [],
+                                "total": _major(option["total"], quote["currency"])}] if option and option.get("type") == "shipping" else [],
             "customer_note": "Placed by an AI shopping agent (Agentic Commerce Protocol)",
             "meta_data": [{"key": "acp_checkout_session_id", "value": sess["id"]},
                           {"key": "stripe_payment_intent", "value": pi_id},
@@ -420,14 +546,18 @@ def _int(x):
 def build_quote(m, cart, option_id=None):
     """Map a Woo Store API cart to the spec's line_items / fulfillment_options / totals."""
     cur = (cart["totals"].get("currency_code") or m.get("currency") or "USD").lower()
+    # Woo reports amounts in the store's configured decimals; the spec and Stripe want ISO-4217 minor units
+    woo_dec = _int(cart["totals"].get("currency_minor_unit", 2)) if cart["totals"].get("currency_minor_unit") is not None else 2
+    scale = 10 ** (_minor_units(cur) - woo_dec)
+    _amt = (lambda x: _int(x)) if scale == 1 else (lambda x: int(round(_int(x) * scale)))
     line_items, cart_items = [], []
     for it in cart["items"]:
-        unit = _int(it["prices"]["price"])
+        unit = _amt(it["prices"]["price"])
         qty = int(it["quantity"])
         base = unit * qty
-        sub = _int(it["totals"]["line_subtotal"])
-        tax = _int(it["totals"]["line_total_tax"])
-        total = _int(it["totals"]["line_total"]) + tax
+        sub = _amt(it["totals"]["line_subtotal"])
+        tax = _amt(it["totals"]["line_total_tax"])
+        total = _amt(it["totals"]["line_total"]) + tax
         line_items.append({
             "id": str(it["id"]),
             "item": {"id": str(it["id"]), "quantity": qty},
@@ -446,7 +576,7 @@ def build_quote(m, cart, option_id=None):
     elif len(packages) <= 1:
         for pkg in packages:
             for rt in pkg["shipping_rates"]:
-                opt = _ship_option(m, shipping_cfg, rt, now, pkg.get("package_id", 0))
+                opt = _ship_option(m, shipping_cfg, rt, now, pkg.get("package_id", 0), _amt)
                 options.append(opt)
                 if rt.get("selected"):
                     selected = opt
@@ -459,10 +589,10 @@ def build_quote(m, cart, option_id=None):
         for name, rts in by_name.items():
             if len(rts) != len(packages):
                 continue
-            base = _ship_option(m, shipping_cfg, rts[0][1], now, rts[0][0])
+            base = _ship_option(m, shipping_cfg, rts[0][1], now, rts[0][0], _amt)
             base["id"] = "multi:" + hashlib.sha1(name.encode()).hexdigest()[:10]
-            base["subtotal"] = sum(_int(r["price"]) for _, r in rts)
-            base["tax"] = sum(_int(r.get("taxes") or 0) for _, r in rts)
+            base["subtotal"] = sum(_amt(r["price"]) for _, r in rts)
+            base["tax"] = sum(_amt(r.get("taxes") or 0) for _, r in rts)
             base["total"] = base["subtotal"] + base["tax"]
             base["_rates"] = [(pid, r["rate_id"]) for pid, r in rts]
             options.append(base)
@@ -473,27 +603,27 @@ def build_quote(m, cart, option_id=None):
     t = cart["totals"]
     items_base = sum(li["base_amount"] for li in line_items)
     items_disc = sum(li["discount"] for li in line_items)
-    subtotal = _int(t["total_items"])
-    fulfillment = _int(t["total_shipping"])
-    tax = _int(t["total_tax"])
-    total = _int(t["total_price"])
+    subtotal = _amt(t["total_items"])
+    fulfillment = _amt(t["total_shipping"])
+    tax = _amt(t["total_tax"])
+    total = _amt(t["total_price"])
     totals = [
         {"type": "items_base_amount", "display_text": "Items", "amount": items_base},
         {"type": "items_discount", "display_text": "Item discounts", "amount": items_disc},
         {"type": "subtotal", "display_text": "Subtotal", "amount": subtotal},
-        {"type": "discount", "display_text": "Discounts", "amount": _int(t.get("total_discount") or 0)},
+        {"type": "discount", "display_text": "Discounts", "amount": _amt(t.get("total_discount") or 0)},
         {"type": "fulfillment", "display_text": "Shipping", "amount": fulfillment},
         {"type": "tax", "display_text": "Tax", "amount": tax},
-        {"type": "fee", "display_text": "Fees", "amount": _int(t.get("total_fees") or 0)},
+        {"type": "fee", "display_text": "Fees", "amount": _amt(t.get("total_fees") or 0)},
         {"type": "total", "display_text": "Total", "amount": total},
     ]
     return {"currency": cur, "line_items": line_items, "fulfillment_options": options,
             "fulfillment_option_id": selected["id"] if selected else None, "totals": totals,
             "_cart_items": cart_items, "_selected": selected}
 
-def _ship_option(m, shipping_cfg, rt, now, package_id):
+def _ship_option(m, shipping_cfg, rt, now, package_id, _amt=_int):
     cfg = shipping_cfg.get(rt["rate_id"]) or shipping_cfg.get(rt.get("method_id", "")) or _guess_shipping(rt["name"])
-    sub = _int(rt["price"]); tax = _int(rt.get("taxes") or 0)
+    sub = _amt(rt["price"]); tax = _amt(rt.get("taxes") or 0)
     return {
         "type": "shipping", "id": rt["rate_id"],
         "title": cfg.get("title") or rt["name"],
@@ -572,7 +702,16 @@ def _load_session(slug, sid):
     return {"id": r["id"], "merchant": r["merchant"], "status": r["status"], "cart_token": r["cart_token"],
             "items": json.loads(r["items"]), "buyer": json.loads(r["buyer"]), "address": json.loads(r["address"]),
             "option_id": r["option_id"], "quote": json.loads(r["quote"]), "quote_hash": r["quote_hash"],
-            "order_id": r["order_id"], "created": r["created"], "drift": bool(r["drift"]) if "drift" in r.keys() else False}
+            "order_id": r["order_id"], "created": r["created"], "updated": r["updated"],
+            "drift": bool(r["drift"]) if "drift" in r.keys() else False}
+
+def _claim_charge(slug, sid):
+    """Compare-and-set ready_for_payment -> in_progress so two concurrent /complete calls (different idempotency
+    keys, e.g. a retry racing the original) can never both reach Stripe. Returns True for the caller that won."""
+    with _db_lock, _db() as c:
+        cur = c.execute("UPDATE sessions SET status='in_progress', updated=? WHERE id=? AND merchant=? AND status='ready_for_payment'",
+                        (_now(), sid, slug))
+        return cur.rowcount == 1
 
 def _requote(m, s):
     """Rebuild the Woo cart from the session's items/address/option and return a fresh quote."""
@@ -604,13 +743,15 @@ def _requote(m, s):
 def _validate_items(items):
     if not isinstance(items, list) or not items:
         raise ACPError(400, "missing", "items[] is required", param="$.items")
+    if len(items) > MAX_ITEMS:
+        raise ACPError(400, "invalid", f"at most {MAX_ITEMS} items per checkout", param="$.items")
     out = []
     for i, it in enumerate(items):
         if not isinstance(it, dict) or "id" not in it:
             raise ACPError(400, "missing", "items[].id is required", param=f"$.items[{i}].id")
         q = it.get("quantity", 1)
-        if isinstance(q, bool) or not isinstance(q, int) or q <= 0:
-            raise ACPError(400, "invalid", "items[].quantity must be a positive integer", param=f"$.items[{i}].quantity")
+        if isinstance(q, bool) or not isinstance(q, int) or q <= 0 or q > MAX_QTY:
+            raise ACPError(400, "invalid", f"items[].quantity must be an integer from 1 to {MAX_QTY}", param=f"$.items[{i}].quantity")
         try:
             int(str(it["id"]))
         except ValueError:
@@ -618,6 +759,25 @@ def _validate_items(items):
                            param=f"$.items[{i}].id")
         out.append({"id": str(it["id"]), "quantity": q})
     return out
+
+def _validate_obj(v, param):
+    """buyer / fulfillment_address: null or a flat object of short scalar fields (they are stored, echoed back,
+    sent to the store as billing data and to Stripe as receipt_email — never accept arbitrary nested JSON)."""
+    if v is None:
+        return None
+    if not isinstance(v, dict):
+        raise ACPError(400, "invalid", f"{param[2:]} must be an object", param=param)
+    if len(v) > 30:
+        raise ACPError(400, "invalid", f"{param[2:]} has too many fields", param=param)
+    for k, x in v.items():
+        if not isinstance(k, str) or len(k) > 64:
+            raise ACPError(400, "invalid", "invalid field name", param=param)
+        if isinstance(x, str):
+            if len(x) > MAX_STR:
+                raise ACPError(400, "invalid", f"{k} longer than {MAX_STR} characters", param=f"{param}.{k}")
+        elif x is not None and not isinstance(x, (int, float, bool)):
+            raise ACPError(400, "invalid", f"{k} must be a string", param=f"{param}.{k}")
+    return v
 
 # ----------------------------------------------------------------------------- endpoints
 @bp.route("/acp/<slug>/checkout_sessions", methods=["POST"])
@@ -630,8 +790,8 @@ def create_session(slug):
     try:
         body = request.get_json(force=True, silent=True) or {}
         s = {"id": _sid(), "merchant": slug, "status": "not_ready_for_payment", "cart_token": None,
-             "items": _validate_items(body.get("items")), "buyer": body.get("buyer"),
-             "address": body.get("fulfillment_address"), "option_id": None, "created": _now()}
+             "items": _validate_items(body.get("items")), "buyer": _validate_obj(body.get("buyer"), "$.buyer"),
+             "address": _validate_obj(body.get("fulfillment_address"), "$.fulfillment_address"), "option_id": None, "created": _now()}
         q = _requote(m, s)
         _save_session(s)
         return _reply(slug, ep, key, 201, session_view(m, s, q))
@@ -656,11 +816,14 @@ def update_session(slug, sid):
         if "items" in body:
             s["items"] = _validate_items(body["items"])
         if "buyer" in body:
-            s["buyer"] = body["buyer"]
+            s["buyer"] = _validate_obj(body["buyer"], "$.buyer")
         if "fulfillment_address" in body:
-            s["address"] = body["fulfillment_address"]
+            s["address"] = _validate_obj(body["fulfillment_address"], "$.fulfillment_address")
         if "fulfillment_option_id" in body:
-            s["option_id"] = body["fulfillment_option_id"]
+            oid = body["fulfillment_option_id"]
+            if oid is not None and (not isinstance(oid, str) or len(oid) > MAX_STR):
+                raise ACPError(400, "invalid", "fulfillment_option_id must be a string", param="$.fulfillment_option_id")
+            s["option_id"] = oid
         s["drift"] = False   # the agent is fetching fresh totals, so they'll be shown before any complete
         q = _requote(m, s)
         msgs = []
@@ -712,18 +875,27 @@ def complete_session(slug, sid):
             order = {"id": s["order_id"], "checkout_session_id": s["id"], "permalink_url": _permalink(slug, s["order_id"])}
             return _reply(slug, ep, key, 200, session_view(m, s, s["quote"], order=order, include_provider=False))
         if s["status"] == "in_progress":
-            # payment already taken, store order still being created by the worker — never charge twice
-            order = {"id": s["id"], "checkout_session_id": s["id"], "permalink_url": _permalink(slug, s["id"])}
-            return _reply(slug, ep, key, 200, session_view(m, s, s["quote"], [{"type": "info", "code": "in_progress",
-                          "content_type": "plain", "content": "Payment received; the store is confirming your order."}],
-                          order=order, include_provider=False))
+            with _db() as c:
+                ledger = c.execute("SELECT 1 FROM orders WHERE merchant=? AND session_id=?", (slug, s["id"])).fetchone()
+            if ledger or _now() - (s.get("updated") or 0) < CHARGE_LOCK_STALE:
+                # payment already taken (or being taken right now by a concurrent call) — never charge twice
+                order = {"id": s["id"], "checkout_session_id": s["id"], "permalink_url": _permalink(slug, s["id"])}
+                return _reply(slug, ep, key, 200, session_view(m, s, s["quote"], [{"type": "info", "code": "in_progress",
+                              "content_type": "plain", "content": "Payment received; the store is confirming your order."}],
+                              order=order, include_provider=False))
+            # charge lock left behind by a crash mid-charge and no ledger row: release it. A re-charge with the same
+            # token+amount is deduplicated by Stripe's idempotency key, so this cannot double-charge.
+            s["status"] = "ready_for_payment"
+            _save_session(s)
         if s["status"] == "canceled":
             raise ACPError(405, "invalid", "session is canceled")
         body = request.get_json(force=True, silent=True) or {}
         pd = body.get("payment_data") or {}
+        if not isinstance(pd, dict):
+            raise ACPError(400, "invalid", "payment_data must be an object", param="$.payment_data")
         if body.get("buyer"):
-            s["buyer"] = body["buyer"]
-        if not pd.get("token"):
+            s["buyer"] = _validate_obj(body["buyer"], "$.buyer")
+        if not pd.get("token") or not isinstance(pd["token"], str) or len(pd["token"]) > MAX_STR:
             raise ACPError(400, "missing", "payment_data.token is required", param="$.payment_data.token")
         if pd.get("provider", "stripe") != "stripe":
             raise ACPError(400, "invalid", "only provider=stripe is supported", param="$.payment_data.provider")
@@ -750,10 +922,25 @@ def complete_session(slug, sid):
                           "content_type": "plain", "content": "Prices or availability changed; please review the updated totals."}],
                           include_provider=False))
         total = next(t["amount"] for t in q["totals"] if t["type"] == "total")
+        if total <= 0:
+            raise ACPError(400, "invalid", "order total must be positive", param="$.totals")
+        # take the charge lock: the session was just saved as ready_for_payment by _requote; if another /complete
+        # got here first (or a crashed one holds a fresh lock) we answer in_progress instead of charging again
+        _save_session(s)
+        if not _claim_charge(slug, s["id"]):
+            s["status"] = "in_progress"
+            order = {"id": s["id"], "checkout_session_id": s["id"], "permalink_url": _permalink(slug, s["id"])}
+            return _reply(slug, ep, key, 200, session_view(m, s, q, [{"type": "info", "code": "in_progress",
+                          "content_type": "plain", "content": "Payment is being processed; the store is confirming your order."}],
+                          order=order, include_provider=False))
         # charge the shared payment token on the merchant's Stripe account
-        pi = _stripe_charge(m, pd["token"], total, q["currency"], s["id"], (s.get("buyer") or {}).get("email"))
+        try:
+            pi = _stripe_charge(m, pd["token"], total, q["currency"], s["id"], (s.get("buyer") or {}).get("email"))
+        except Exception:
+            _save_session(s)   # release the lock (s.status is still ready_for_payment locally)
+            raise
         if not pi["ok"]:
-            _save_session(s)
+            _save_session(s)   # declined: release the charge lock so the agent can retry with another token
             return _reply(slug, ep, key, 200, session_view(m, s, q, [{"type": "error", "code": "payment_declined",
                           "param": "$.payment_data.token", "content_type": "plain", "content": pi["message"]}], include_provider=False))
         pi_id = pi["id"]
@@ -806,9 +993,13 @@ def _stripe_charge(m, spt, amount, currency, session_id, email=None):
     headers = dict(UA)
     if m.get("stripe_version"):
         headers["Stripe-Version"] = m["stripe_version"]
+    # Idempotency key = session + token + amount. Stripe replays the first result for a key (declines included) and
+    # rejects the key with different params, so a per-session key would leave a session unpayable after one decline;
+    # a per-(session, token, amount) key still dedupes the retry that matters (same token after a lost response).
+    ik = "acp-" + hashlib.sha256(f"{session_id}|{spt}|{amount}|{currency}".encode()).hexdigest()[:40]
     try:
         r = requests.post("https://api.stripe.com/v1/payment_intents", data=data, auth=(m["stripe_secret_key"], ""),
-                          headers={**headers, "Idempotency-Key": f"acp-{session_id}"}, timeout=30)
+                          headers={**headers, "Idempotency-Key": ik}, timeout=30)
         j = r.json()
     except Exception as e:
         return {"ok": False, "message": f"payment service unavailable ({type(e).__name__})"}
@@ -863,9 +1054,12 @@ def permalink(token):
         return "Not found", 404
     order, bad = None, False
     if request.method == "POST":
+        if not _rate_ok(f"permalink:{_client_ip()}", limit=PERMALINK_RATE):
+            return "Too many attempts, try again in a minute.", 429
         email = (request.form.get("email") or "").strip().lower()
-        o = Woo(m).get_order(oid) if m.get("woo_ck") else None
-        if o and (o.get("billing", {}).get("email", "").lower() == email):
+        o = Woo(m).get_order(oid) if (email and m.get("woo_ck")) else None
+        # an order placed without a buyer email has billing.email == "" — an empty guess must not match it
+        if o and email and ((o.get("billing") or {}).get("email") or "").strip().lower() == email:
             order = o
         else:
             bad = True
@@ -884,7 +1078,7 @@ def _deliver(row):
     if row["event"] == "_retry_order":       # internal: finish an order whose store call failed at /complete
         s = _load_session(row["merchant"], payload["session_id"])
         with _db() as c:
-            orow = c.execute("SELECT status FROM orders WHERE session_id=?", (s["id"],)).fetchone()
+            orow = c.execute("SELECT status FROM orders WHERE merchant=? AND session_id=?", (row["merchant"], s["id"])).fetchone()
         if orow and orow["status"] == "canceled":
             return True   # refunded meanwhile (reconcile ?fix=1) — never create the store order after a refund
         w = Woo(m)
@@ -892,7 +1086,8 @@ def _deliver(row):
         s["status"], s["order_id"] = "completed", str(o["id"])
         _save_session(s)
         with _db_lock, _db() as c:
-            c.execute("UPDATE orders SET woo_order_id=?, status='created', id=? WHERE session_id=?", (str(o["id"]), str(o["id"]), s["id"]))
+            c.execute("UPDATE orders SET woo_order_id=?, status='created', id=? WHERE merchant=? AND session_id=?",
+                      (str(o["id"]), str(o["id"]), row["merchant"], s["id"]))
         _queue(row["merchant"], "order_updated", {"type": "order_updated", "data": {"type": "order", "checkout_session_id": s["id"],
                "permalink_url": _permalink(row["merchant"], str(o["id"])), "status": "confirmed", "refunds": []}})
         return True
@@ -909,14 +1104,14 @@ def _give_up_order(row):
     """All retries to create the store order failed: refund the PaymentIntent, cancel the session, notify OpenAI."""
     m = _m(row["merchant"]); payload = json.loads(row["payload"])
     with _db() as c:
-        o = c.execute("SELECT * FROM orders WHERE session_id=?", (payload["session_id"],)).fetchone()
+        o = c.execute("SELECT * FROM orders WHERE merchant=? AND session_id=?", (row["merchant"], payload["session_id"])).fetchone()
     if not o or o["status"] == "canceled":
         return
     res = {"id": "re_mock"} if (o["stripe_pi"] or "").startswith("pi_mock_") else stripe_refund(m, o["stripe_pi"])
     import sys; print(f"[acp] gave up on order for {payload['session_id']}: refund {res.get('id')} {res.get('error')}", file=sys.stderr)
     with _db_lock, _db() as c:
-        c.execute("UPDATE orders SET status='canceled', refunded=amount WHERE id=?", (o["id"],))
-        c.execute("UPDATE sessions SET status='canceled' WHERE id=?", (payload["session_id"],))
+        c.execute("UPDATE orders SET status='canceled', refunded=amount WHERE merchant=? AND id=?", (row["merchant"], o["id"]))
+        c.execute("UPDATE sessions SET status='canceled' WHERE id=? AND merchant=?", (payload["session_id"], row["merchant"]))
     _queue(row["merchant"], "order_updated", {"type": "order_updated", "data": {"type": "order", "checkout_session_id": payload["session_id"],
            "permalink_url": _permalink(row["merchant"], o["id"]), "status": "canceled",
            "refunds": [{"type": "original_payment", "amount": o["amount"]}]}})
@@ -961,39 +1156,57 @@ WOO_STATUS = {"processing": "confirmed", "on-hold": "manual_review", "completed"
 
 @bp.route("/acp/<slug>/webhooks/woo", methods=["POST"])
 def woo_webhook(slug):
+    """Woo 'order.updated'. This endpoint can trigger a REAL Stripe refund, so the posted body is never trusted on its
+    own: with merchant REST keys the order is re-read from the store (the body is only a hint which order changed);
+    without keys the body is used only when it carries a valid X-WC-Webhook-Signature; otherwise it is ignored."""
     m = _m(slug)
     if not m:
         return "", 404
+    if (request.content_length or 0) > MAX_BODY:
+        return "too large", 413
+    if not _rate_ok(f"woohook:{slug}:{_client_ip()}"):
+        return "rate limited", 429
     raw = request.get_data()
     secret = m.get("woo_webhook_secret")
+    signed = False
     if secret:
         want = base64.b64encode(hmac.new(secret.encode(), raw, hashlib.sha256).digest()).decode()
         if not hmac.compare_digest(request.headers.get("X-WC-Webhook-Signature", ""), want):
             return "bad signature", 401
+        signed = True
     o = request.get_json(silent=True) or {}
-    if not o.get("id"):
+    if not isinstance(o, dict) or not o.get("id"):
         return "", 200   # Woo sends a ping on webhook creation
+    if not (isinstance(o["id"], int) or (isinstance(o["id"], str) and o["id"].isdigit())):
+        return "", 200
+    with _db() as c:
+        row = c.execute("SELECT * FROM orders WHERE merchant=? AND woo_order_id=?", (slug, str(o["id"]))).fetchone()
+    if not row:
+        return "", 200   # not one of ours (checked before any store call, so unknown ids cost nothing)
+    if m.get("woo_ck") and m.get("woo_cs"):
+        o = Woo(m).get_order(str(o["id"]))          # truth comes from the store, not from whoever posted
+        if not o:
+            return "", 200
+    elif not signed:
+        return "", 200   # no keys and no signature: nothing here can be verified
     ext = f"{o['id']}:{o.get('date_modified')}"
     with _db_lock, _db() as c:
         if c.execute("SELECT 1 FROM inbound WHERE source='woo' AND ext_id=?", (ext,)).fetchone():
             return "", 200
         c.execute("INSERT INTO inbound VALUES ('woo',?,?)", (ext, _now()))
-        row = c.execute("SELECT * FROM orders WHERE merchant=? AND woo_order_id=?", (slug, str(o["id"]))).fetchone()
-    if not row:
-        return "", 200   # not one of ours
     status = WOO_STATUS.get(o.get("status"), "confirmed")
     refunds = []
-    refunded_total = sum(abs(int(round(float(r.get("total", 0)) * 100))) for r in o.get("refunds", []))
+    refunded_total = sum(_to_minor(r.get("total", 0), row["currency"]) for r in (o.get("refunds") or []) if isinstance(r, dict))
     if refunded_total and refunded_total > (row["refunded"] or 0):
         # merchant refunded in Woo -> mirror on Stripe (Woo can't refund a PaymentIntent it didn't create)
-        delta = refunded_total - (row["refunded"] or 0)
-        if row["stripe_pi"] and not row["stripe_pi"].startswith("pi_mock_"):
+        delta = min(refunded_total, row["amount"] or refunded_total) - (row["refunded"] or 0)
+        if delta > 0 and row["stripe_pi"] and not row["stripe_pi"].startswith("pi_mock_"):
             stripe_refund(m, row["stripe_pi"], delta)
         with _db_lock, _db() as c:
-            c.execute("UPDATE orders SET refunded=? WHERE id=?", (refunded_total, row["id"]))
+            c.execute("UPDATE orders SET refunded=? WHERE merchant=? AND id=?", (refunded_total, slug, row["id"]))
         refunds = [{"type": "original_payment", "amount": refunded_total}]
     with _db_lock, _db() as c:
-        c.execute("UPDATE orders SET status=? WHERE id=?", (status, row["id"]))
+        c.execute("UPDATE orders SET status=? WHERE merchant=? AND id=?", (status, slug, row["id"]))
     _queue(slug, "order_updated", {"type": "order_updated", "data": {"type": "order", "checkout_session_id": row["session_id"],
            "permalink_url": _permalink(slug, row["woo_order_id"]), "status": status, "refunds": refunds}})
     return "", 200
@@ -1016,18 +1229,36 @@ def stripe_webhook(slug):
     m = _m(slug)
     if not m:
         return "", 404
+    if (request.content_length or 0) > MAX_BODY:
+        return "too large", 413
+    if not _rate_ok(f"stripehook:{slug}:{_client_ip()}"):
+        return "rate limited", 429
     raw = request.get_data()
     secret = m.get("stripe_webhook_secret")
     if secret and not _stripe_sig_ok(secret, raw, request.headers.get("Stripe-Signature", "")):
         return "bad signature", 401
     ev = request.get_json(silent=True) or {}
-    if not ev.get("id"):
+    if not isinstance(ev, dict) or not isinstance(ev.get("id"), str) or not ev["id"].startswith("evt_") or len(ev["id"]) > 64:
         return "", 200
+    if not secret:
+        # no signing secret configured: an unsigned body can put a store order on hold or mark it refunded, so the
+        # event is re-read from Stripe by id with the merchant's key (or ignored when there is no key)
+        if not m.get("stripe_secret_key"):
+            return "", 200
+        try:
+            r = requests.get(f"https://api.stripe.com/v1/events/{ev['id']}", auth=(m["stripe_secret_key"], ""), headers=UA, timeout=20)
+            ev = r.json() if r.status_code == 200 else {}
+        except Exception:
+            ev = {}
+        if not isinstance(ev, dict) or not ev.get("id"):
+            return "", 200
     with _db_lock, _db() as c:
         if c.execute("SELECT 1 FROM inbound WHERE source='stripe' AND ext_id=?", (ev["id"],)).fetchone():
             return "", 200
         c.execute("INSERT INTO inbound VALUES ('stripe',?,?)", (ev["id"], _now()))
     obj = (ev.get("data") or {}).get("object") or {}
+    if not isinstance(obj, dict):
+        return "", 200
     pi = obj.get("payment_intent") if isinstance(obj.get("payment_intent"), str) else (obj.get("payment_intent") or {}).get("id")
     if ev.get("type", "").startswith("payment_intent."):
         pi = obj.get("id")
@@ -1039,25 +1270,25 @@ def stripe_webhook(slug):
         return "", 200
     t = ev.get("type")
     if t == "charge.refunded":
-        refunded = int(obj.get("amount_refunded") or 0)
+        refunded = _int(obj.get("amount_refunded") or 0)
         if refunded > (row["refunded"] or 0) and row["woo_order_id"] and m.get("woo_ck"):
             # refund happened in Stripe (dashboard/dispute) -> record it in Woo without re-charging the PSP
             delta = refunded - (row["refunded"] or 0)
             try:
                 requests.post(f"{m['store_url'].rstrip('/')}/wp-json/wc/v3/orders/{row['woo_order_id']}/refunds",
-                              json={"amount": f"{delta / 100:.2f}", "reason": "Refunded via Stripe", "api_refund": False},
+                              json={"amount": _major(delta, row["currency"]), "reason": "Refunded via Stripe", "api_refund": False},
                               auth=(m["woo_ck"], m["woo_cs"]), headers=UA, timeout=30)
             except Exception:
                 pass
         status = "canceled" if refunded >= (row["amount"] or 0) else row["status"]
         with _db_lock, _db() as c:
-            c.execute("UPDATE orders SET refunded=?, status=? WHERE id=?", (refunded, status, row["id"]))
+            c.execute("UPDATE orders SET refunded=?, status=? WHERE merchant=? AND id=?", (refunded, status, slug, row["id"]))
         _queue(slug, "order_updated", {"type": "order_updated", "data": {"type": "order", "checkout_session_id": row["session_id"],
                "permalink_url": _permalink(slug, row["woo_order_id"] or row["id"]), "status": status,
                "refunds": [{"type": "original_payment", "amount": refunded}]}})
     elif t == "charge.dispute.created":
         with _db_lock, _db() as c:
-            c.execute("UPDATE orders SET status='manual_review' WHERE id=?", (row["id"],))
+            c.execute("UPDATE orders SET status='manual_review' WHERE merchant=? AND id=?", (slug, row["id"]))
         if row["woo_order_id"] and m.get("woo_ck"):
             try:
                 requests.put(f"{m['store_url'].rstrip('/')}/wp-json/wc/v3/orders/{row['woo_order_id']}",
@@ -1109,10 +1340,12 @@ def reconcile(slug):
             issue = "woo order missing"
         elif not r["woo_order_id"]:
             issue = "no woo order (pending_store)"
-            if fix and _now() - r["created"] > 7200:
+            if r["status"] == "canceled":
+                issue = None   # already refunded (give-up or an earlier ?fix=1) — never refund twice
+            elif fix and _now() - r["created"] > 7200:
                 res = stripe_refund(m, r["stripe_pi"]) if pi_status != "mock" else {"id": "re_mock"}
                 with _db_lock, _db() as c:
-                    c.execute("UPDATE orders SET status='canceled', refunded=amount WHERE id=?", (r["id"],))
+                    c.execute("UPDATE orders SET status='canceled', refunded=amount WHERE merchant=? AND id=?", (slug, r["id"]))
                 report["fixed"].append({"order": r["id"], "refund": res.get("id"), "error": (res.get("error") or {}).get("message")})
         elif woo and woo.get("status") == "trash":
             issue = "woo order trashed"
@@ -1194,12 +1427,44 @@ def _store_policy_text(store_url, keywords=("shipping", "delivery")):
         pass
     return ""
 
-def onboard_merchant(store_url, woo_ck=None, woo_cs=None, stripe_secret_key=None, seller_name=None, contact_email=None):
-    """Run every connectivity check, discover policies + shipping, build the merchant config. Returns (config|None, checks)."""
+_HOST_RE = re.compile(r"^(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$")
+
+def _resolve_host(host):
+    """All addresses the host resolves to (an IP literal resolves to itself). Separate so tests can stub it."""
+    try:
+        return [ipaddress.ip_address(host)]
+    except ValueError:
+        pass
+    return [ipaddress.ip_address(ai[4][0]) for ai in socket.getaddrinfo(host, 443, proto=socket.IPPROTO_TCP)]
+
+def _public_host(host):
+    """A merchant-supplied store host may only be a public DNS name that resolves to public addresses — onboarding
+    makes ~8 outbound requests with it, which must never reach localhost, the metadata service or the private network."""
+    if not host or not _HOST_RE.match(host):
+        return False
+    try:
+        addrs = _resolve_host(host)
+    except Exception:
+        return False
+    return bool(addrs) and all(a.is_global and not a.is_multicast for a in addrs)
+
+def onboard_merchant(store_url, woo_ck=None, woo_cs=None, stripe_secret_key=None, seller_name=None, contact_email=None,
+                     bearer_key=None):
+    """Run every connectivity check, discover policies + shipping, build the merchant config. Returns (config|None, checks).
+    bearer_key: the current endpoint key, required to re-onboard a store that is already connected (proof of control;
+    valid Woo REST keys for the store are accepted instead)."""
     import feed_engine
-    store_url = "https://" + re.sub(r"^https?://", "", store_url.strip().lower()).split("/")[0]
-    domain = store_url[8:]
+    host = re.sub(r"^https?://", "", (store_url or "").strip().lower()).split("/")[0]
+    host = host.rsplit("@", 1)[-1].split(":")[0]   # drop userinfo / port before validating
+    store_url = "https://" + host
+    domain = host
     checks, cfg = {}, {"store_url": store_url, "seller_name": seller_name or domain.split(".")[0].title()}
+    if not _public_host(domain):
+        checks["store_url"] = {"ok": False, "error": "store URL must be a public https host name"}
+        return (re.sub(r"[^a-z0-9]+", "", domain.split(".")[0]) or "invalid", None), checks
+    if (seller_name and len(seller_name) > 120) or (contact_email and len(contact_email) > 200):
+        checks["store_url"] = {"ok": False, "error": "seller name / contact email too long"}
+        return (re.sub(r"[^a-z0-9]+", "", domain.split(".")[0]) or "invalid", None), checks
     m_tmp = dict(cfg)
     # 1. Store API reachable + a quote works
     rates, currency = [], None
@@ -1271,6 +1536,16 @@ def onboard_merchant(store_url, woo_ck=None, woo_cs=None, stripe_secret_key=None
     existing = _runtime_merchants().get(slug)
     if existing and existing.get("store_url") != store_url:   # different store, same first label
         slug = slug + "-" + hashlib.sha1(domain.encode()).hexdigest()[:6]
+        existing = _runtime_merchants().get(slug)
+    if existing:
+        # same store already connected: anyone can type a public store URL, so re-onboarding (which rotates the bearer
+        # key and replaces the Woo/Stripe keys) needs proof of control — the current bearer key or working Woo REST keys
+        proves = (bearer_key and hmac.compare_digest(str(bearer_key), str(existing.get("bearer_key") or ""))) \
+                 or bool(checks.get("woo_rest", {}).get("ok"))
+        if not proves:
+            checks["slug"] = {"ok": False, "error": "this store is already connected — re-run with its current bearer key "
+                                                    "or valid WooCommerce REST keys to replace the configuration"}
+            return (slug, None), checks
     ready = checks["store_api"].get("ok") and checks["policies"]["ok"]
     return (slug, cfg) if ready else (slug, None), checks
 
@@ -1281,7 +1556,7 @@ label{display:block;margin:14px 0 4px;font-weight:600}input{font-size:16px;paddi
 button{font-size:16px;padding:12px 18px;margin-top:18px;background:#111;color:#fff;border:0;border-radius:8px}.mut{color:#666;font-size:.92em}
 pre{background:#f6f6f6;padding:12px;border-radius:8px;overflow:auto;font-size:.85em}.ok{color:#0a7d3c}.bad{color:#b00020}</style>
 <h2>Prepare an ACP checkout endpoint (optional)</h2>
-<p class=mut>ChatGPT does not run in-chat checkout for merchants today (OpenAI retired Instant Checkout in March 2026; shoppers buy on your site). This sets up a sandbox-tested Agentic Commerce Protocol endpoint in front of your WooCommerce store, ready to reference if agent checkout reopens. We run every check and map your shipping options from your own policy page. Use a Stripe <b>restricted</b> key (PaymentIntents + Refunds) rather than your secret key; keys are stored encrypted, never shown again, and deleted on request (see <a href="/terms">terms</a>).</p>
+<p class=mut>ChatGPT does not run in-chat checkout for merchants today (OpenAI retired Instant Checkout in March 2026; shoppers buy on your site). This sets up a sandbox-tested Agentic Commerce Protocol endpoint in front of your WooCommerce store, ready to reference if agent checkout reopens. We run every check and map your shipping options from your own policy page. Use a Stripe <b>restricted</b> key (PaymentIntents + Refunds) rather than your secret key; keys are never shown again and deleted on request (see <a href="/terms">terms</a>); the results below state whether this server encrypts them at rest.</p>
 <form method=post>
 <label>Store URL</label><input name=store_url placeholder="https://yourstore.com" required>
 <label>Store / brand name</label><input name=seller_name placeholder="Your Brand">
@@ -1289,6 +1564,7 @@ pre{background:#f6f6f6;padding:12px;border-radius:8px;overflow:auto;font-size:.8
 <label>WooCommerce REST consumer key <span class=mut>(WooCommerce → Settings → Advanced → REST API → Add key, Read/Write)</span></label><input name=woo_ck placeholder="ck_…">
 <label>WooCommerce REST consumer secret</label><input name=woo_cs placeholder="cs_…" type=password>
 <label>Stripe secret key <span class=mut>(Developers → API keys; a restricted key with PaymentIntents + Refunds write is enough)</span></label><input name=stripe_secret_key placeholder="sk_live_… or rk_live_…" type=password>
+<label>Current endpoint bearer key <span class=mut>(only when re-connecting a store that is already set up; WooCommerce keys work too)</span></label><input name=bearer_key placeholder="acp_…" type=password autocomplete=off>
 <button>Run checks &amp; connect</button></form>
 {% if checks %}<h3>Results</h3>
 <ul>{% for k, v in checks.items() %}<li><b>{{k}}</b>: <span class="{{'ok' if v.get('ok') else 'bad'}}">{{'OK' if v.get('ok') else 'FAILED'}}</span> <span class=mut>{{ v | tojson }}</span></li>{% endfor %}</ul>
@@ -1305,23 +1581,29 @@ Stripe → Developers → Webhooks → Add endpoint: events charge.refunded, cha
 def onboard():
     if request.method == "GET":
         return render_template_string(ONBOARD_HTML, checks=None)
+    if (request.content_length or 0) > MAX_BODY:
+        return "too large", 413
     f = request.form if request.form else (request.get_json(silent=True) or {})
-    if not (f.get("store_url") or "").strip():
+    if not isinstance(f, dict) and not hasattr(f, "get"):
+        f = {}
+    fld = lambda k: (f.get(k) if isinstance(f.get(k), str) else "") or None   # noqa: E731 — form/JSON field, strings only
+    if not (fld("store_url") or "").strip():
         return render_template_string(ONBOARD_HTML, checks={"store_url": {"ok": False, "error": "required"}}, cfg=None)
     ip = _client_ip()
-    if not _rate_ok(f"onboard:{ip}") or not _rate_ok("onboard:global"):
+    # each onboarding = a crawl of the given host + an LLM call; keep it far below the API rate limit
+    if not _rate_ok(f"onboard:{ip}", limit=ONBOARD_RATE_IP, window=ONBOARD_WINDOW) \
+            or not _rate_ok("onboard:global", limit=ONBOARD_RATE_GLOBAL, window=ONBOARD_WINDOW):
         return "Too many attempts, try again later.", 429
-    (slug, cfg), checks = onboard_merchant(f.get("store_url"), f.get("woo_ck") or None, f.get("woo_cs") or None,
-                                           f.get("stripe_secret_key") or None, f.get("seller_name") or None, f.get("contact_email") or None)
+    (slug, cfg), checks = onboard_merchant(fld("store_url"), fld("woo_ck"), fld("woo_cs"), fld("stripe_secret_key"),
+                                           fld("seller_name"), fld("contact_email"), bearer_key=fld("bearer_key"))
     if cfg:
         # persist at runtime (app data file); secrets never echoed except the bearer key, once
         try:
-            df = os.environ.get("DATA_FILE", "/tmp/cani_data.json")
-            d = json.load(open(df)) if os.path.exists(df) else {}
-            d.setdefault("acp_merchants", {})[slug] = dict(cfg, onboarded=_now(), source_ip=ip)
-            json.dump(d, open(df, "w"))
+            _persist_runtime_merchant(slug, dict(cfg, onboarded=_now(), source_ip=ip))
         except Exception as e:
-            import sys; print(f"[acp] onboard persist failed: {e}", file=sys.stderr)
+            import sys; print(f"[acp] onboard persist failed: {type(e).__name__}", file=sys.stderr)
+        checks["storage"] = {"ok": bool(_fernet()), "encrypted_at_rest": bool(_fernet()),
+                             "note": "" if _fernet() else "server has no ACP_SECRETS_KEY: keys held in plaintext on an ephemeral disk"}
         try:
             from app import log_lead
             log_lead(cfg["store_url"], "", cfg.get("contact_email", ""), extra=f"acp onboard {slug}", kind="acp")
@@ -1340,6 +1622,8 @@ def health(slug):
     m = _m(slug)
     if not m:
         return jsonify({"ok": False, "error": "unknown merchant"}), 404
+    if not _rate_ok(f"health:{_client_ip()}", limit=HEALTH_RATE):   # every call opens a cart on the merchant's store
+        return jsonify({"ok": False, "error": "rate limited"}), 429
     out = {"ok": True, "merchant": slug, "api_version": API_VERSION, "mock_payments": MOCK_PAY}
     try:
         w = Woo(m); tok = w.new_cart(); out["store_api"] = "ok"
